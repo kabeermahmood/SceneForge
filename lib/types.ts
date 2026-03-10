@@ -1,0 +1,100 @@
+export interface Character {
+  name: string;
+  type: "human" | "animal" | "object";
+  species: string | null;
+  appearance: string;
+  personality_visual_cues: string;
+  default_pose: string;
+}
+
+export interface CharacterBible {
+  characters: Character[];
+  primary_setting: string;
+  color_palette: string[];
+  overall_mood: string;
+}
+
+export interface Scene {
+  chunk_index: number;
+  script_text: string;
+  scene_description: string;
+  scene_emotion: string;
+  characters_present: string[];
+  image_base64: string | null;
+  image_mime_type: string | null;
+  status: "pending" | "generating" | "completed" | "failed" | "approved";
+  generation_prompt: string;
+  error_message: string | null;
+}
+
+export interface ProjectState {
+  script: string;
+  duration_seconds: number;
+  art_style: string;
+  art_style_custom: string;
+  aspect_ratio: "16:9" | "9:16" | "1:1";
+  seconds_per_scene: number;
+  character_bible: CharacterBible | null;
+  scenes: Scene[];
+  pipeline_stage:
+    | "idle"
+    | "generating_bible"
+    | "chunking"
+    | "generating_images"
+    | "complete"
+    | "error";
+  current_scene_index: number;
+  error_message: string | null;
+}
+
+export type ArtStyleOption = {
+  id: string;
+  label: string;
+  description: string;
+  prompt_text: string;
+};
+
+export const ART_STYLES: ArtStyleOption[] = [
+  {
+    id: "cute_minimal",
+    label: "Cute Minimal",
+    description:
+      "Clean lines, soft warm colors, minimal backgrounds — like Mindful Paws",
+    prompt_text:
+      "Cute minimalist 2D illustration with clean outlines, soft warm color palette, simple flat backgrounds, adorable cartoon-style characters with expressive eyes, professional children's animation quality, consistent line weight throughout",
+  },
+  {
+    id: "flat_vector",
+    label: "Flat Vector",
+    description: "Modern flat design, bold colors, geometric shapes",
+    prompt_text:
+      "Modern flat vector illustration with bold solid colors, clean geometric shapes, no gradients, minimal shadows, professional graphic design quality, consistent proportions throughout",
+  },
+  {
+    id: "watercolor_storybook",
+    label: "Watercolor Storybook",
+    description: "Soft edges, watercolor textures, children's book feel",
+    prompt_text:
+      "Soft watercolor illustration with gentle washes of color, visible paper texture, delicate line work, children's storybook quality, dreamy atmospheric backgrounds, warm and inviting mood",
+  },
+  {
+    id: "anime",
+    label: "Anime / Manga",
+    description: "Anime-influenced, expressive eyes, dynamic poses",
+    prompt_text:
+      "Anime-style 2D illustration with large expressive eyes, clean cel-shading, vibrant colors, dynamic composition, Japanese animation quality, detailed hair and clothing",
+  },
+  {
+    id: "realistic",
+    label: "Realistic Illustration",
+    description: "Semi-realistic digital painting style",
+    prompt_text:
+      "Semi-realistic digital illustration with detailed rendering, natural lighting, rich textures, professional concept art quality, cinematic composition, photorealistic proportions",
+  },
+  {
+    id: "custom",
+    label: "Custom Style",
+    description: "Describe your own art style",
+    prompt_text: "",
+  },
+];
