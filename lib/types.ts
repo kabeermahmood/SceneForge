@@ -27,6 +27,41 @@ export interface Scene {
   error_message: string | null;
 }
 
+export type ProcessingMode = "batch" | "standard";
+
+export interface ImageModelOption {
+  id: string;
+  label: string;
+  description: string;
+  supportsBatch: boolean;
+  /** Standard API cost per image in USD (1024px) */
+  costPerImage: number;
+}
+
+export const IMAGE_MODELS: ImageModelOption[] = [
+  {
+    id: "gemini-2.5-flash-image",
+    label: "Gemini 2.5 Flash Image",
+    description: "Best quality, character consistency, production-ready",
+    supportsBatch: true,
+    costPerImage: 0.039,
+  },
+  {
+    id: "gemini-3.1-flash-image-preview",
+    label: "Gemini 3.1 Flash Image (Preview)",
+    description: "Newest preview model, experimental",
+    supportsBatch: true,
+    costPerImage: 0.067,
+  },
+  {
+    id: "gemini-3-pro-image-preview",
+    label: "Gemini 3 Pro Image (Preview)",
+    description: "Pro-tier quality, higher cost",
+    supportsBatch: true,
+    costPerImage: 0.134,
+  },
+];
+
 export interface ProjectState {
   script: string;
   duration_seconds: number;
@@ -34,6 +69,8 @@ export interface ProjectState {
   art_style_custom: string;
   aspect_ratio: "16:9" | "9:16" | "1:1";
   seconds_per_scene: number;
+  processing_mode: ProcessingMode;
+  image_model: string;
   character_bible: CharacterBible | null;
   scenes: Scene[];
   pipeline_stage:

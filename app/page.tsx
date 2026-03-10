@@ -27,6 +27,7 @@ import SceneTimeline from "@/components/SceneTimeline";
 import StoryboardGrid from "@/components/StoryboardGrid";
 import DownloadPanel from "@/components/DownloadPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import ProcessingConfig from "@/components/ProcessingConfig";
 
 function HomeContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -37,6 +38,9 @@ function HomeContent() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNewProjectConfirm, setShowNewProjectConfirm] = useState(false);
   const [eta, setEta] = useState<string | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchState, setBatchState] = useState<string>("");
+  const [pollCount, setPollCount] = useState(0);
   const cancelledRef = useRef(false);
   const sceneTimesRef = useRef<number[]>([]);
 
@@ -56,6 +60,8 @@ function HomeContent() {
   const artStyleCustom = useProjectStore((s) => s.art_style_custom);
   const aspectRatio = useProjectStore((s) => s.aspect_ratio);
   const secondsPerScene = useProjectStore((s) => s.seconds_per_scene);
+  const processingMode = useProjectStore((s) => s.processing_mode);
+  const imageModel = useProjectStore((s) => s.image_model);
   const setScenes = useProjectStore((s) => s.setScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
   const setCurrentSceneIndex = useProjectStore((s) => s.setCurrentSceneIndex);
@@ -184,43 +190,131 @@ function HomeContent() {
         return;
       }
 
+      // Step 3: Image Generation
       setPipelineStage("generating_images");
       const artStylePrompt = getArtStylePrompt();
+      const currentModel = imageModel;
 
-      for (let i = 0; i < newScenes.length; i++) {
-        if (cancelledRef.current) break;
+      // Build all prompts upfront regardless of mode
+      type SceneInput = { chunk_index: number; scene_description: string; scene_emotion: string; characters_present: string[]; script_text: string };
+      const scenePrompts = newScenes.map(
+        (scene: SceneInput, i: number) => {
+          const prompt = buildSceneImagePrompt(
+            { ...scene, image_base64: null, image_mime_type: null, status: "pending", generation_prompt: "", error_message: null },
+            newScenes.length,
+            bible,
+            artStylePrompt,
+            aspectRatio
+          );
+          updateScene(i, { generation_prompt: prompt, status: "generating" });
+          return {
+            key: `scene-${String(scene.chunk_index).padStart(2, "0")}`,
+            prompt,
+          };
+        }
+      );
 
-        setCurrentSceneIndex(i);
-        updateScene(i, { status: "generating" });
+      if (processingMode === "batch") {
+        // ── BATCH MODE ──
+        setBatchMode(true);
+        setBatchState("");
+        setPollCount(0);
+        console.log(`[SceneForge] Batch mode — model: ${currentModel}, scenes: ${scenePrompts.length}`);
 
-        const prompt = buildSceneImagePrompt(
-          newScenes[i],
-          newScenes.length,
-          bible,
-          artStylePrompt,
-          aspectRatio
-        );
-        updateScene(i, { generation_prompt: prompt });
+        const batchRes = await fetch("/api/generate-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenePrompts, apiKey, model: currentModel }),
+        });
 
-        const startTime = Date.now();
+        if (!batchRes.ok) {
+          const err = await batchRes.json();
+          throw new Error(err.message || "Failed to submit batch job");
+        }
 
-        // Retry with backoff for rate limits (429)
-        let success = false;
-        for (let attempt = 0; attempt < 4; attempt++) {
+        const { jobName } = await batchRes.json();
+
+        const MAX_POLLS = 180;
+        let polls = 0;
+
+        while (polls < MAX_POLLS && !cancelledRef.current) {
+          await new Promise((r) => setTimeout(r, 10000));
+          polls++;
+          setPollCount(polls);
+
+          try {
+            const statusRes = await fetch("/api/batch-status", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jobName, apiKey }),
+            });
+
+            const statusData = await statusRes.json();
+            setBatchState(statusData.state || "");
+
+            if (statusData.status === "complete") {
+              const images = statusData.images as {
+                key: string;
+                image_base64: string;
+                mime_type: string;
+              }[];
+              for (let i = 0; i < images.length; i++) {
+                if (images[i].image_base64) {
+                  updateScene(i, {
+                    image_base64: images[i].image_base64,
+                    image_mime_type: images[i].mime_type,
+                    status: "completed",
+                  });
+                } else {
+                  updateScene(i, {
+                    status: "failed",
+                    error_message: "No image returned in batch response",
+                  });
+                }
+              }
+              break;
+            }
+
+            if (statusData.status === "failed") {
+              throw new Error(statusData.error || "Batch job failed");
+            }
+
+            if (statusData.status === "cancelled") {
+              throw new Error("Batch job was cancelled");
+            }
+          } catch (pollErr: unknown) {
+            if (pollErr instanceof Error && (pollErr.message.includes("Batch job failed") || pollErr.message.includes("cancelled"))) {
+              throw pollErr;
+            }
+            console.warn("[SceneForge] Poll error, retrying:", pollErr);
+          }
+        }
+
+        if (polls >= MAX_POLLS && !cancelledRef.current) {
+          throw new Error("Batch job timed out after 30 minutes");
+        }
+      } else {
+        // ── STANDARD (SEQUENTIAL) MODE ──
+        setBatchMode(false);
+        console.log(`[SceneForge] Standard mode — model: ${currentModel}, scenes: ${scenePrompts.length}`);
+
+        for (let i = 0; i < scenePrompts.length; i++) {
+          if (cancelledRef.current) break;
+          setCurrentSceneIndex(i);
+
+          const startTime = Date.now();
+
           try {
             const imgRes = await fetch("/api/generate-scene", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt, apiKey }),
+              body: JSON.stringify({
+                prompt: scenePrompts[i].prompt,
+                apiKey,
+                model: currentModel,
+              }),
             });
-            if (imgRes.status === 429) {
-              const backoff = Math.pow(2, attempt + 1) * 5000; // 10s, 20s, 40s, 80s
-              updateScene(i, {
-                error_message: `Rate limited — retrying in ${backoff / 1000}s (attempt ${attempt + 1}/4)...`,
-              });
-              await new Promise((r) => setTimeout(r, backoff));
-              continue;
-            }
+
             if (!imgRes.ok) {
               const err = await imgRes.json();
               updateScene(i, {
@@ -235,52 +329,26 @@ function HomeContent() {
                 status: "completed",
               });
             }
-            success = true;
-            break;
           } catch (err: unknown) {
-            if (attempt === 3) {
-              updateScene(i, {
-                status: "failed",
-                error_message:
-                  err instanceof Error ? err.message : "Image generation failed",
-              });
-            } else {
-              const backoff = Math.pow(2, attempt + 1) * 5000;
-              await new Promise((r) => setTimeout(r, backoff));
-            }
-          }
-        }
-        if (!success) {
-          const currentScene = useProjectStore.getState().scenes[i];
-          if (currentScene?.status === "generating") {
             updateScene(i, {
               status: "failed",
-              error_message: "Failed after 4 retry attempts",
+              error_message: err instanceof Error ? err.message : "Image generation failed",
             });
           }
-        }
 
-        // Track timing for ETA
-        const elapsed = (Date.now() - startTime) / 1000;
-        sceneTimesRef.current.push(elapsed);
-        const avgTime =
-          sceneTimesRef.current.reduce((a, b) => a + b, 0) /
-          sceneTimesRef.current.length;
-        const remaining = (newScenes.length - i - 1) * avgTime;
-        if (remaining > 0) {
-          setEta(
-            `~${Math.ceil(remaining)} second${Math.ceil(remaining) !== 1 ? "s" : ""} remaining`
+          const elapsed = (Date.now() - startTime) / 1000;
+          sceneTimesRef.current.push(elapsed);
+          const avg = sceneTimesRef.current.reduce((a, b) => a + b, 0) / sceneTimesRef.current.length;
+          const remaining = (scenePrompts.length - i - 1) * avg;
+          setEta(remaining > 60
+            ? `~${Math.ceil(remaining / 60)} min remaining`
+            : `~${Math.ceil(remaining)}s remaining`
           );
-        } else {
-          setEta(null);
-        }
-
-        if (i < newScenes.length - 1 && !cancelledRef.current) {
-          await new Promise((r) => setTimeout(r, 6000));
         }
       }
 
       setEta(null);
+      setBatchMode(false);
       setPipelineStage("complete");
     } catch (err: unknown) {
       setPipelineStage("error");
@@ -293,6 +361,8 @@ function HomeContent() {
     durationSeconds,
     secondsPerScene,
     aspectRatio,
+    processingMode,
+    imageModel,
     getArtStylePrompt,
     setPipelineStage,
     setErrorMessage,
@@ -306,7 +376,8 @@ function HomeContent() {
   const handleRegenerate = useCallback(
     async (index: number) => {
       const apiKey = getApiKey();
-      const scene = useProjectStore.getState().scenes[index];
+      const state = useProjectStore.getState();
+      const scene = state.scenes[index];
       if (!scene || !apiKey) return;
 
       updateScene(index, { status: "generating", error_message: null });
@@ -315,7 +386,7 @@ function HomeContent() {
         const imgRes = await fetch("/api/generate-scene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: scene.generation_prompt, apiKey }),
+          body: JSON.stringify({ prompt: scene.generation_prompt, apiKey, model: state.image_model }),
         });
         if (!imgRes.ok) {
           const err = await imgRes.json();
@@ -371,7 +442,7 @@ function HomeContent() {
         const imgRes = await fetch("/api/generate-scene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, apiKey }),
+          body: JSON.stringify({ prompt, apiKey, model: state.image_model }),
         });
         if (!imgRes.ok) {
           const err = await imgRes.json();
@@ -462,6 +533,8 @@ function HomeContent() {
           </div>
 
           <StyleSelector />
+
+          <ProcessingConfig />
 
           {!hasApiKey && (
             <div className="rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent">
@@ -689,7 +762,11 @@ function HomeContent() {
         </div>
       </header>
 
-      <ProgressTracker />
+      <ProgressTracker
+        batchMode={batchMode}
+        batchState={batchState}
+        pollCount={pollCount}
+      />
 
       {eta && pipelineStage === "generating_images" && (
         <p className="mt-2 text-center text-xs text-text-secondary/60">

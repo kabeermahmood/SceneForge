@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { CharacterBible, ProjectState, Scene } from "@/lib/types";
+import type {
+  CharacterBible,
+  ProcessingMode,
+  ProjectState,
+  Scene,
+} from "@/lib/types";
 
 interface ProjectActions {
   setScript: (script: string) => void;
@@ -8,6 +13,8 @@ interface ProjectActions {
   setArtStyleCustom: (text: string) => void;
   setAspectRatio: (ratio: "16:9" | "9:16" | "1:1") => void;
   setSecondsPerScene: (seconds: number) => void;
+  setProcessingMode: (mode: ProcessingMode) => void;
+  setImageModel: (model: string) => void;
   setCharacterBible: (bible: CharacterBible) => void;
   setScenes: (scenes: Scene[]) => void;
   updateScene: (index: number, updates: Partial<Scene>) => void;
@@ -24,6 +31,8 @@ const initialState: ProjectState = {
   art_style_custom: "",
   aspect_ratio: "16:9",
   seconds_per_scene: 8,
+  processing_mode: "batch",
+  image_model: "gemini-2.5-flash-image",
   character_bible: null,
   scenes: [],
   pipeline_stage: "idle",
@@ -41,6 +50,8 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setArtStyleCustom: (text) => set({ art_style_custom: text }),
     setAspectRatio: (ratio) => set({ aspect_ratio: ratio }),
     setSecondsPerScene: (seconds) => set({ seconds_per_scene: seconds }),
+    setProcessingMode: (mode) => set({ processing_mode: mode }),
+    setImageModel: (model) => set({ image_model: model }),
     setCharacterBible: (bible) => set({ character_bible: bible }),
     setScenes: (scenes) => set({ scenes }),
     updateScene: (index, updates) =>

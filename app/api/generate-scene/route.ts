@@ -5,14 +5,14 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-const IMAGE_MODELS = [
+const FALLBACK_MODELS = [
   "gemini-2.5-flash-image",
-  "gemini-2.0-flash-exp-image-generation",
+  "gemini-3.1-flash-image-preview",
 ];
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey } = await request.json();
+    const { prompt, apiKey, model } = await request.json();
 
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json(
@@ -33,15 +33,19 @@ export async function POST(request: NextRequest) {
     let mimeType: string | null = null;
     let lastError: string = "";
 
-    for (const model of IMAGE_MODELS) {
+    const modelsToTry = model && typeof model === "string"
+      ? [model, ...FALLBACK_MODELS.filter((m) => m !== model)]
+      : FALLBACK_MODELS;
+
+    for (const modelId of modelsToTry) {
       if (imageBase64) break;
 
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          console.log(`[generate-scene] Trying ${model} (attempt ${attempt + 1})`);
+          console.log(`[generate-scene] Trying ${modelId} (attempt ${attempt + 1})`);
 
           const response = await genAI.models.generateContent({
-            model,
+            model: modelId,
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             config: {
               responseModalities: ["image", "text"],
@@ -59,12 +63,12 @@ export async function POST(request: NextRequest) {
           }
 
           if (imageBase64) {
-            console.log(`[generate-scene] Success with ${model}`);
+            console.log(`[generate-scene] Success with ${modelId}`);
             break;
           }
         } catch (err: unknown) {
           lastError = err instanceof Error ? err.message : String(err);
-          console.log(`[generate-scene] ${model} attempt ${attempt + 1} failed:`, lastError);
+          console.log(`[generate-scene] ${modelId} attempt ${attempt + 1} failed:`, lastError);
 
           const isRateLimit =
             lastError.includes("429") ||
@@ -73,12 +77,12 @@ export async function POST(request: NextRequest) {
           const isNotFound = lastError.includes("404") || lastError.includes("NOT_FOUND");
 
           if (isNotFound) {
-            console.log(`[generate-scene] Model ${model} not available, skipping`);
+            console.log(`[generate-scene] Model ${modelId} not available, skipping`);
             break;
           }
 
           if (isRateLimit && attempt === 0) {
-            console.log(`[generate-scene] Rate limited on ${model}, waiting 20s...`);
+            console.log(`[generate-scene] Rate limited on ${modelId}, waiting 20s...`);
             await sleep(20000);
             continue;
           }

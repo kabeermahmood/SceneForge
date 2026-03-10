@@ -1,14 +1,24 @@
 "use client";
 
 import { useProjectStore } from "@/store/useProjectStore";
-import { Check, Loader2, Circle } from "lucide-react";
+import { Check, Loader2, Circle, Zap } from "lucide-react";
 
 interface Step {
   label: string;
   state: "pending" | "active" | "complete";
 }
 
-export default function ProgressTracker() {
+interface ProgressTrackerProps {
+  batchMode?: boolean;
+  batchState?: string;
+  pollCount?: number;
+}
+
+export default function ProgressTracker({
+  batchMode,
+  batchState,
+  pollCount,
+}: ProgressTrackerProps) {
   const pipelineStage = useProjectStore((s) => s.pipeline_stage);
   const scenes = useProjectStore((s) => s.scenes);
   const currentIndex = useProjectStore((s) => s.current_scene_index);
@@ -17,6 +27,12 @@ export default function ProgressTracker() {
     (s) => s.status === "completed" || s.status === "approved"
   ).length;
   const totalScenes = scenes.length;
+
+  const step3Label = batchMode
+    ? `Batch Processing All ${totalScenes} Scenes`
+    : totalScenes > 0
+      ? `Generating Scene Images (${completedCount}/${totalScenes})`
+      : "Generating Scene Images (0/0)";
 
   const steps: Step[] = [
     {
@@ -38,10 +54,7 @@ export default function ProgressTracker() {
             : "complete",
     },
     {
-      label:
-        totalScenes > 0
-          ? `Generating Scene Images (${completedCount}/${totalScenes})`
-          : "Generating Scene Images (0/0)",
+      label: step3Label,
       state:
         pipelineStage === "generating_images"
           ? "active"
@@ -64,10 +77,7 @@ export default function ProgressTracker() {
               )}
               {step.state === "active" && (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/20">
-                  <Loader2
-                    size={18}
-                    className="animate-spin text-accent"
-                  />
+                  <Loader2 size={18} className="animate-spin text-accent" />
                 </div>
               )}
               {step.state === "pending" && (
@@ -91,7 +101,40 @@ export default function ProgressTracker() {
         ))}
       </div>
 
-      {pipelineStage === "generating_images" && totalScenes > 0 && (
+      {/* Batch mode indicator */}
+      {pipelineStage === "generating_images" && batchMode && (
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center justify-center gap-2 text-accent">
+            <Zap size={16} />
+            <span className="text-sm font-semibold">
+              50% Cost Savings with Batch API
+            </span>
+          </div>
+
+          {/* Indeterminate pulsing progress bar */}
+          <div className="h-2 w-full overflow-hidden rounded-full bg-border">
+            <div className="h-full w-1/3 animate-[indeterminate_1.5s_ease-in-out_infinite] rounded-full bg-accent" />
+          </div>
+
+          <p className="text-center text-xs text-text-secondary">
+            {batchState === "JOB_STATE_QUEUED" && "Queued — waiting for processing slot..."}
+            {batchState === "JOB_STATE_PENDING" && "Pending — preparing batch job..."}
+            {batchState === "JOB_STATE_RUNNING" && "Running — generating all images..."}
+            {!batchState && "Submitting batch job..."}
+            {pollCount != null && pollCount > 0 && (
+              <span className="ml-1 text-text-secondary/40">
+                (poll #{pollCount})
+              </span>
+            )}
+          </p>
+          <p className="text-center text-[11px] text-text-secondary/50">
+            Typically 1–5 minutes for completion
+          </p>
+        </div>
+      )}
+
+      {/* Sequential mode progress bar */}
+      {pipelineStage === "generating_images" && !batchMode && totalScenes > 0 && (
         <div className="mt-6">
           <div className="h-2 w-full overflow-hidden rounded-full bg-border">
             <div
