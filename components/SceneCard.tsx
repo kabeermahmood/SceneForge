@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, X, RefreshCw, Pencil, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Check, X, RefreshCw, Pencil, ChevronDown, ChevronUp, Loader2, Download } from "lucide-react";
 import type { Scene } from "@/lib/types";
 
 interface SceneCardProps {
@@ -26,6 +26,15 @@ export default function SceneCard({
   const [showPrompt, setShowPrompt] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(scene.scene_description);
+
+  const downloadImage = () => {
+    if (!scene.image_base64 || !scene.image_mime_type) return;
+    const ext = scene.image_mime_type.includes("png") ? "png" : "jpg";
+    const link = document.createElement("a");
+    link.href = `data:${scene.image_mime_type};base64,${scene.image_base64}`;
+    link.download = `scene-${String(scene.chunk_index).padStart(2, "0")}.${ext}`;
+    link.click();
+  };
 
   const borderClass =
     scene.status === "approved"
@@ -170,6 +179,13 @@ export default function SceneCard({
                 >
                   <Pencil size={12} />
                   Edit
+                </button>
+                <button
+                  onClick={downloadImage}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-accent hover:text-accent"
+                >
+                  <Download size={12} />
+                  Save
                 </button>
                 <button
                   onClick={() => onApproveToggle?.(index)}

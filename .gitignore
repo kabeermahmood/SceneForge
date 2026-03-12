@@ -4,6 +4,14 @@ node_modules/
 .pnp.js
 .pnp.cjs
 
+
+# Exe Files
+*.exe
+*.dll
+*.so
+dist-electron/
+electron/
+
 # next.js
 .next/
 out/
@@ -11,6 +19,7 @@ out/
 # build
 build/
 dist/
+dist-electron/
 
 # env files
 .env

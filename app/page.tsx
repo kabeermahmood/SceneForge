@@ -42,6 +42,7 @@ function HomeContent() {
   const [batchState, setBatchState] = useState<string>("");
   const [pollCount, setPollCount] = useState(0);
   const cancelledRef = useRef(false);
+  const switchToStandardRef = useRef(false);
   const sceneTimesRef = useRef<number[]>([]);
 
   const script = useProjectStore((s) => s.script);
@@ -214,123 +215,282 @@ function HomeContent() {
         }
       );
 
-      if (processingMode === "batch") {
-        // ── BATCH MODE ──
+      // ── HERO FRAME: Generate Scene 1 first as visual reference ──
+      let heroImage: { data: string; mimeType: string } | null = null;
+      console.log("[SceneForge] Generating hero frame (Scene 1) for reference anchoring...");
+      setCurrentSceneIndex(0);
+
+      try {
+        const heroRes = await fetch("/api/generate-scene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: scenePrompts[0].prompt,
+            apiKey,
+            model: currentModel,
+          }),
+        });
+
+        if (heroRes.ok) {
+          const heroData = await heroRes.json();
+          if (heroData.image_base64) {
+            heroImage = { data: heroData.image_base64, mimeType: heroData.mime_type || "image/png" };
+            updateScene(0, {
+              image_base64: heroData.image_base64,
+              image_mime_type: heroData.mime_type,
+              status: "completed",
+            });
+            console.log("[SceneForge] Hero frame generated — will anchor remaining scenes");
+          }
+        } else {
+          const err = await heroRes.json();
+          console.warn("[SceneForge] Hero frame failed, continuing without reference:", err.message);
+          updateScene(0, { status: "failed", error_message: err.message || "Hero frame failed" });
+        }
+      } catch (err: unknown) {
+        console.warn("[SceneForge] Hero frame error, continuing without reference:", err);
+        updateScene(0, {
+          status: "failed",
+          error_message: err instanceof Error ? err.message : "Hero frame failed",
+        });
+      }
+
+      if (cancelledRef.current) { setPipelineStage("complete"); return; }
+
+      // Remaining scenes (skip index 0 which was the hero frame)
+      const remainingPrompts = scenePrompts.slice(1);
+
+      if (processingMode === "batch" && remainingPrompts.length > 0) {
+        // ── BATCH MODE (parallel sub-batches, no timeout, user-controlled exit) ──
         setBatchMode(true);
         setBatchState("");
         setPollCount(0);
-        console.log(`[SceneForge] Batch mode — model: ${currentModel}, scenes: ${scenePrompts.length}`);
+        switchToStandardRef.current = false;
 
-        const batchRes = await fetch("/api/generate-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scenePrompts, apiKey, model: currentModel }),
-        });
-
-        if (!batchRes.ok) {
-          const err = await batchRes.json();
-          throw new Error(err.message || "Failed to submit batch job");
+        const SUB_BATCH_SIZE = 6;
+        const subBatches: { prompts: typeof remainingPrompts; startOffset: number }[] = [];
+        for (let i = 0; i < remainingPrompts.length; i += SUB_BATCH_SIZE) {
+          subBatches.push({
+            prompts: remainingPrompts.slice(i, i + SUB_BATCH_SIZE),
+            startOffset: i + 1,
+          });
         }
 
-        const { jobName } = await batchRes.json();
+        console.log(
+          `[SceneForge] Batch mode — model: ${currentModel}, total: ${remainingPrompts.length}, sub-batches: ${subBatches.length} (×${SUB_BATCH_SIZE}), ref: ${heroImage ? "yes" : "no"}`
+        );
 
-        const MAX_POLLS = 180;
-        let polls = 0;
+        // ── SUBMIT ALL SUB-BATCHES IN PARALLEL ──
+        type ActiveJob = { jobName: string; batchIdx: number; sub: typeof subBatches[0] };
+        const activeJobs: ActiveJob[] = [];
 
-        while (polls < MAX_POLLS && !cancelledRef.current) {
-          await new Promise((r) => setTimeout(r, 10000));
-          polls++;
-          setPollCount(polls);
+        const submissions = await Promise.all(
+          subBatches.map(async (sub, batchIdx) => {
+            const batchBody: Record<string, unknown> = {
+              scenePrompts: sub.prompts,
+              apiKey,
+              model: currentModel,
+            };
+            if (heroImage) batchBody.referenceImage = heroImage;
 
-          try {
-            const statusRes = await fetch("/api/batch-status", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ jobName, apiKey }),
-            });
+            try {
+              const batchRes = await fetch("/api/generate-batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(batchBody),
+              });
 
-            const statusData = await statusRes.json();
-            setBatchState(statusData.state || "");
+              if (batchRes.ok) {
+                const batchData = await batchRes.json();
+                console.log(`[SceneForge] Sub-batch ${batchIdx + 1} submitted — job: ${batchData.jobName}`);
+                return { jobName: batchData.jobName as string, batchIdx, sub };
+              } else {
+                const err = await batchRes.json();
+                console.error(`[SceneForge] Sub-batch ${batchIdx + 1} submission failed:`, err.message);
+                return null;
+              }
+            } catch (submitErr: unknown) {
+              console.error(`[SceneForge] Sub-batch ${batchIdx + 1} submit error:`, submitErr);
+              return null;
+            }
+          })
+        );
 
-            if (statusData.status === "complete") {
-              const images = statusData.images as {
-                key: string;
-                image_base64: string;
-                mime_type: string;
-              }[];
-              for (let i = 0; i < images.length; i++) {
-                if (images[i].image_base64) {
-                  updateScene(i, {
-                    image_base64: images[i].image_base64,
-                    image_mime_type: images[i].mime_type,
+        for (const s of submissions) {
+          if (s) activeJobs.push(s);
+        }
+
+        setBatchState(`0/${subBatches.length} complete`);
+        console.log(`[SceneForge] ${activeJobs.length}/${subBatches.length} sub-batches submitted successfully`);
+
+        // ── POLL ALL ACTIVE JOBS IN UNIFIED LOOP ──
+        let totalPolls = 0;
+        const completedJobIndices = new Set<number>();
+
+        while (activeJobs.length > 0 && !cancelledRef.current && !switchToStandardRef.current) {
+          const elapsed = totalPolls * 15;
+          const pollInterval = elapsed < 120 ? 15_000 : elapsed < 600 ? 20_000 : 30_000;
+          await new Promise((r) => setTimeout(r, pollInterval));
+          totalPolls++;
+          setPollCount(totalPolls);
+
+          for (let ji = activeJobs.length - 1; ji >= 0; ji--) {
+            if (cancelledRef.current || switchToStandardRef.current) break;
+
+            const job = activeJobs[ji];
+            try {
+              const statusRes = await fetch("/api/batch-status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jobName: job.jobName, apiKey }),
+              });
+
+              const statusData = await statusRes.json();
+              const stateLabel = statusData.state || "polling";
+
+              if (statusData.status === "complete") {
+                const images = statusData.images as { key: string; image_base64: string; mime_type: string }[];
+                let successCount = 0;
+                for (let i = 0; i < images.length; i++) {
+                  const sceneIdx = job.sub.startOffset + i;
+                  if (images[i].image_base64) {
+                    updateScene(sceneIdx, {
+                      image_base64: images[i].image_base64,
+                      image_mime_type: images[i].mime_type,
+                      status: "completed",
+                    });
+                    successCount++;
+                  }
+                }
+                console.log(`[SceneForge] Sub-batch ${job.batchIdx + 1} complete — ${successCount}/${images.length} succeeded`);
+                completedJobIndices.add(job.batchIdx);
+                activeJobs.splice(ji, 1);
+              } else if (statusData.status === "failed" || statusData.status === "cancelled") {
+                console.warn(`[SceneForge] Sub-batch ${job.batchIdx + 1} ${statusData.status}`);
+                activeJobs.splice(ji, 1);
+              } else {
+                setBatchState(`${completedJobIndices.size}/${subBatches.length} complete | batch ${job.batchIdx + 1}: ${stateLabel}`);
+              }
+            } catch (pollErr: unknown) {
+              console.warn(`[SceneForge] Poll error for sub-batch ${job.batchIdx + 1} (continuing):`, pollErr);
+            }
+          }
+
+          setBatchState(`${completedJobIndices.size}/${subBatches.length} complete${activeJobs.length > 0 ? ` | ${activeJobs.length} in progress` : ""}`);
+        }
+
+        if (switchToStandardRef.current) {
+          console.log(`[SceneForge] User requested switch to standard processing — ${activeJobs.length} batch jobs abandoned`);
+        }
+
+        // ── STANDARD FALLBACK for ALL scenes not yet completed ──
+        if (!cancelledRef.current) {
+          const scenesState = useProjectStore.getState().scenes;
+          const pendingScenes: { sceneIdx: number; prompt: string }[] = [];
+
+          for (let i = 0; i < remainingPrompts.length; i++) {
+            const sceneIdx = i + 1;
+            const s = scenesState[sceneIdx];
+            if (s && s.status !== "completed" && s.status !== "approved") {
+              pendingScenes.push({ sceneIdx, prompt: remainingPrompts[i].prompt });
+            }
+          }
+
+          if (pendingScenes.length > 0) {
+            const reason = switchToStandardRef.current ? "user switched to standard" : "batch failures";
+            console.log(`[SceneForge] Standard fallback — ${pendingScenes.length} scenes (${reason})`);
+            setBatchMode(false);
+            setEta(`Generating ${pendingScenes.length} remaining scene${pendingScenes.length > 1 ? "s" : ""} via standard API (3 parallel)...`);
+
+            const FALLBACK_CONCURRENCY = 3;
+
+            const generateFallback = async (item: { sceneIdx: number; prompt: string }) => {
+              setCurrentSceneIndex(item.sceneIdx);
+              updateScene(item.sceneIdx, { status: "generating", error_message: null });
+
+              try {
+                const reqBody: Record<string, unknown> = {
+                  prompt: item.prompt,
+                  apiKey,
+                  model: currentModel,
+                };
+                if (heroImage) reqBody.referenceImage = heroImage;
+
+                const imgRes = await fetch("/api/generate-scene", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(reqBody),
+                });
+
+                if (imgRes.ok) {
+                  const imgData = await imgRes.json();
+                  updateScene(item.sceneIdx, {
+                    image_base64: imgData.image_base64,
+                    image_mime_type: imgData.mime_type,
                     status: "completed",
                   });
                 } else {
-                  updateScene(i, {
-                    status: "failed",
-                    error_message: "No image returned in batch response",
-                  });
+                  const err = await imgRes.json();
+                  updateScene(item.sceneIdx, { status: "failed", error_message: err.message || "Generation failed" });
                 }
+              } catch (fbErr: unknown) {
+                updateScene(item.sceneIdx, {
+                  status: "failed",
+                  error_message: fbErr instanceof Error ? fbErr.message : "Generation failed",
+                });
               }
-              break;
-            }
+            };
 
-            if (statusData.status === "failed") {
-              throw new Error(statusData.error || "Batch job failed");
+            for (let i = 0; i < pendingScenes.length; i += FALLBACK_CONCURRENCY) {
+              if (cancelledRef.current) break;
+              const chunk = pendingScenes.slice(i, i + FALLBACK_CONCURRENCY);
+              await Promise.all(chunk.map((item) => generateFallback(item)));
             }
-
-            if (statusData.status === "cancelled") {
-              throw new Error("Batch job was cancelled");
-            }
-          } catch (pollErr: unknown) {
-            if (pollErr instanceof Error && (pollErr.message.includes("Batch job failed") || pollErr.message.includes("cancelled"))) {
-              throw pollErr;
-            }
-            console.warn("[SceneForge] Poll error, retrying:", pollErr);
           }
         }
 
-        if (polls >= MAX_POLLS && !cancelledRef.current) {
-          throw new Error("Batch job timed out after 30 minutes");
-        }
-      } else {
-        // ── STANDARD (SEQUENTIAL) MODE ──
         setBatchMode(false);
-        console.log(`[SceneForge] Standard mode — model: ${currentModel}, scenes: ${scenePrompts.length}`);
+      } else {
+        // ── STANDARD (PARALLEL) MODE — 3 concurrent requests ──
+        setBatchMode(false);
+        const CONCURRENCY = 3;
+        console.log(`[SceneForge] Standard mode — model: ${currentModel}, remaining: ${remainingPrompts.length}, concurrency: ${CONCURRENCY}, ref: ${heroImage ? "yes" : "no"}`);
 
-        for (let i = 0; i < scenePrompts.length; i++) {
-          if (cancelledRef.current) break;
-          setCurrentSceneIndex(i);
-
+        const generateOne = async (localIdx: number) => {
+          const sceneIdx = localIdx + 1;
+          setCurrentSceneIndex(sceneIdx);
           const startTime = Date.now();
 
           try {
+            const reqBody: Record<string, unknown> = {
+              prompt: remainingPrompts[localIdx].prompt,
+              apiKey,
+              model: currentModel,
+            };
+            if (heroImage) reqBody.referenceImage = heroImage;
+
             const imgRes = await fetch("/api/generate-scene", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                prompt: scenePrompts[i].prompt,
-                apiKey,
-                model: currentModel,
-              }),
+              body: JSON.stringify(reqBody),
             });
 
             if (!imgRes.ok) {
               const err = await imgRes.json();
-              updateScene(i, {
+              updateScene(sceneIdx, {
                 status: "failed",
                 error_message: err.message || "Image generation failed",
               });
             } else {
               const imgData = await imgRes.json();
-              updateScene(i, {
+              updateScene(sceneIdx, {
                 image_base64: imgData.image_base64,
                 image_mime_type: imgData.mime_type,
                 status: "completed",
               });
             }
           } catch (err: unknown) {
-            updateScene(i, {
+            updateScene(sceneIdx, {
               status: "failed",
               error_message: err instanceof Error ? err.message : "Image generation failed",
             });
@@ -338,12 +498,27 @@ function HomeContent() {
 
           const elapsed = (Date.now() - startTime) / 1000;
           sceneTimesRef.current.push(elapsed);
-          const avg = sceneTimesRef.current.reduce((a, b) => a + b, 0) / sceneTimesRef.current.length;
-          const remaining = (scenePrompts.length - i - 1) * avg;
-          setEta(remaining > 60
-            ? `~${Math.ceil(remaining / 60)} min remaining`
-            : `~${Math.ceil(remaining)}s remaining`
-          );
+        };
+
+        // Process in chunks of CONCURRENCY
+        for (let i = 0; i < remainingPrompts.length; i += CONCURRENCY) {
+          if (cancelledRef.current) break;
+
+          const chunk = remainingPrompts.slice(i, i + CONCURRENCY);
+          const indices = chunk.map((_: unknown, j: number) => i + j);
+
+          await Promise.all(indices.map((idx: number) => generateOne(idx)));
+
+          // Update ETA after each parallel chunk completes
+          if (sceneTimesRef.current.length > 0) {
+            const avg = sceneTimesRef.current.reduce((a, b) => a + b, 0) / sceneTimesRef.current.length;
+            const completedSoFar = i + chunk.length;
+            const remaining = ((remainingPrompts.length - completedSoFar) / CONCURRENCY) * avg;
+            setEta(remaining > 60
+              ? `~${Math.ceil(remaining / 60)} min remaining`
+              : `~${Math.ceil(remaining)}s remaining`
+            );
+          }
         }
       }
 
@@ -351,10 +526,30 @@ function HomeContent() {
       setBatchMode(false);
       setPipelineStage("complete");
     } catch (err: unknown) {
-      setPipelineStage("error");
-      setErrorMessage(
-        err instanceof Error ? err.message : "An unexpected error occurred"
+      const hasAnyScenes = useProjectStore.getState().scenes.length > 0;
+      const hasAnyCompleted = useProjectStore.getState().scenes.some(
+        (s) => s.status === "completed" || s.status === "approved"
       );
+
+      if (hasAnyCompleted) {
+        // We have results — go to complete view so user keeps their progress
+        console.warn("[SceneForge] Pipeline error, but preserving completed scenes:", err);
+        setEta(null);
+        setBatchMode(false);
+        setPipelineStage("complete");
+      } else if (hasAnyScenes) {
+        // We have scenes but no images — still show complete so user can retry individual scenes
+        console.warn("[SceneForge] Pipeline error during image gen, showing partial results:", err);
+        setEta(null);
+        setBatchMode(false);
+        setPipelineStage("complete");
+      } else {
+        // Failed before any scenes were created (bible/chunking failure) — show error screen
+        setPipelineStage("error");
+        setErrorMessage(
+          err instanceof Error ? err.message : "An unexpected error occurred"
+        );
+      }
     }
   }, [
     script,
@@ -766,6 +961,7 @@ function HomeContent() {
         batchMode={batchMode}
         batchState={batchState}
         pollCount={pollCount}
+        onSwitchToStandard={batchMode ? () => { switchToStandardRef.current = true; } : undefined}
       />
 
       {eta && pipelineStage === "generating_images" && (

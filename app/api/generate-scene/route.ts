@@ -12,7 +12,7 @@ const FALLBACK_MODELS = [
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, model } = await request.json();
+    const { prompt, apiKey, model, referenceImage } = await request.json();
 
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json(
@@ -37,6 +37,24 @@ export async function POST(request: NextRequest) {
       ? [model, ...FALLBACK_MODELS.filter((m) => m !== model)]
       : FALLBACK_MODELS;
 
+    // Build parts array — text + optional reference image
+    const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [];
+
+    if (referenceImage && typeof referenceImage === "object" && referenceImage.data) {
+      parts.push({
+        inlineData: {
+          mimeType: referenceImage.mimeType || "image/png",
+          data: referenceImage.data,
+        },
+      });
+      parts.push({
+        text: `[REFERENCE SCREENSHOT ABOVE]: This is Scene 1 from the animated video. Your generated image MUST match this reference exactly — same characters, same art style, same colors, same line weight. Generate a SINGLE fullscreen scene that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames, NO margins, NO white space. One continuous scene like a movie screenshot.\n\n${prompt}`,
+      });
+      console.log(`[generate-scene] Using reference image anchoring (${Math.round(referenceImage.data.length / 1024)}KB)`);
+    } else {
+      parts.push({ text: prompt });
+    }
+
     for (const modelId of modelsToTry) {
       if (imageBase64) break;
 
@@ -46,7 +64,7 @@ export async function POST(request: NextRequest) {
 
           const response = await genAI.models.generateContent({
             model: modelId,
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            contents: [{ role: "user", parts }],
             config: {
               responseModalities: ["image", "text"],
             },

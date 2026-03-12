@@ -2,12 +2,16 @@
   "name": "sceneforge",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:start": "electron .",
+    "electron:build": "next build && node scripts/prepare-electron.js && electron-builder --win",
+    "electron:pack": "electron-builder --win --prepackaged dist-electron/win-unpacked"
   },
   "keywords": [],
   "author": "",
@@ -34,6 +38,10 @@
   },
   "devDependencies": {
     "@types/file-saver": "^2.0.7",
-    "eslint": "^10.0.3"
+    "concurrently": "^9.2.1",
+    "electron": "^40.8.0",
+    "electron-builder": "^26.8.1",
+    "eslint": "^10.0.3",
+    "wait-on": "^9.0.4"
   }
 }

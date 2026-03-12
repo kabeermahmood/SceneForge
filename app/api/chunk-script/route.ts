@@ -1,16 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { geminiTextToJSON } from "@/lib/gemini";
-import { buildChunkingPrompt } from "@/lib/prompts";
+import {
+  buildChunkingPrompt,
+  buildActsPrompt,
+  buildActChunkingPrompt,
+} from "@/lib/prompts";
+
+interface SceneChunk {
+  chunk_index: number;
+  script_text: string;
+  scene_description: string;
+  scene_emotion: string;
+  characters_present: string[];
+}
 
 interface ChunkResponse {
-  scenes: {
-    chunk_index: number;
+  scenes: SceneChunk[];
+}
+
+interface ActResponse {
+  acts: {
+    act_index: number;
+    act_title: string;
     script_text: string;
-    scene_description: string;
-    scene_emotion: string;
-    characters_present: string[];
+    scene_count: number;
   }[];
 }
+
+const HIERARCHICAL_THRESHOLD = 20;
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,21 +66,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prompt = buildChunkingPrompt(script, chunksCount);
-    let data: ChunkResponse;
+    let allScenes: SceneChunk[];
 
-    try {
-      data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
-    } catch {
-      data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
+    if (chunksCount <= HIERARCHICAL_THRESHOLD) {
+      // ── SIMPLE MODE: single-call chunking (≤20 scenes) ──
+      console.log(`[chunk-script] Simple mode — ${chunksCount} scenes`);
+      allScenes = await simpleChunk(script, chunksCount, apiKey);
+    } else {
+      // ── HIERARCHICAL MODE: acts → scenes (>20 scenes) ──
+      const actCount = Math.min(Math.ceil(chunksCount / 15), 8);
+      console.log(
+        `[chunk-script] Hierarchical mode — ${chunksCount} scenes across ${actCount} acts`
+      );
+      allScenes = await hierarchicalChunk(
+        script,
+        chunksCount,
+        actCount,
+        apiKey
+      );
     }
 
-    if (data.scenes.length !== chunksCount) {
-      const retryPrompt = `${prompt}\n\nIMPORTANT: You returned ${data.scenes.length} chunks but I need exactly ${chunksCount}. Please try again with exactly ${chunksCount} chunks.`;
-      data = await geminiTextToJSON<ChunkResponse>(retryPrompt, apiKey);
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json({ scenes: allScenes });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Script chunking failed";
@@ -71,5 +94,130 @@ export async function POST(request: NextRequest) {
       { error: "chunking_failed", message, retryable: true },
       { status: 500 }
     );
+  }
+}
+
+async function simpleChunk(
+  script: string,
+  chunksCount: number,
+  apiKey: string
+): Promise<SceneChunk[]> {
+  const prompt = buildChunkingPrompt(script, chunksCount);
+  let data: ChunkResponse;
+
+  try {
+    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
+  } catch {
+    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
+  }
+
+  if (data.scenes.length !== chunksCount) {
+    const retryPrompt = `${prompt}\n\nIMPORTANT: You returned ${data.scenes.length} chunks but I need exactly ${chunksCount}. Please try again with exactly ${chunksCount} chunks.`;
+    data = await geminiTextToJSON<ChunkResponse>(retryPrompt, apiKey);
+  }
+
+  return data.scenes;
+}
+
+async function hierarchicalChunk(
+  script: string,
+  totalScenes: number,
+  actCount: number,
+  apiKey: string
+): Promise<SceneChunk[]> {
+  // Phase 1: Split into acts
+  const actsPrompt = buildActsPrompt(script, actCount, totalScenes);
+  let actsData: ActResponse;
+
+  try {
+    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey);
+  } catch {
+    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey);
+  }
+
+  const acts = actsData.acts;
+  console.log(
+    `[chunk-script] Got ${acts.length} acts: ${acts.map((a) => `"${a.act_title}" (${a.scene_count} scenes)`).join(", ")}`
+  );
+
+  // Validate scene_count sum matches totalScenes
+  const sceneSum = acts.reduce((sum, a) => sum + a.scene_count, 0);
+  if (sceneSum !== totalScenes) {
+    console.log(
+      `[chunk-script] Act scene counts sum to ${sceneSum}, expected ${totalScenes}. Redistributing.`
+    );
+    redistributeSceneCounts(acts, totalScenes);
+  }
+
+  // Phase 2: Chunk each act into its scenes (sequentially to avoid rate limits)
+  const allScenes: SceneChunk[] = [];
+  let runningIndex = 1;
+
+  for (const act of acts) {
+    if (act.scene_count <= 0) continue;
+
+    console.log(
+      `[chunk-script] Chunking act "${act.act_title}" → ${act.scene_count} scenes (starting at index ${runningIndex})`
+    );
+
+    const actPrompt = buildActChunkingPrompt(
+      act.script_text,
+      act.scene_count,
+      runningIndex,
+      act.act_title
+    );
+
+    let actScenes: ChunkResponse;
+    try {
+      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey);
+    } catch {
+      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey);
+    }
+
+    // Normalize chunk_index to ensure strict sequential ordering
+    for (let i = 0; i < actScenes.scenes.length; i++) {
+      actScenes.scenes[i].chunk_index = runningIndex + i;
+    }
+
+    allScenes.push(...actScenes.scenes);
+    runningIndex += actScenes.scenes.length;
+  }
+
+  console.log(
+    `[chunk-script] Hierarchical chunking complete — ${allScenes.length} total scenes`
+  );
+  return allScenes;
+}
+
+function redistributeSceneCounts(
+  acts: { scene_count: number }[],
+  totalScenes: number
+) {
+  const totalWords = acts.reduce(
+    (sum, a) =>
+      sum +
+      ("script_text" in a
+        ? (a as { script_text: string }).script_text.split(/\s+/).length
+        : 1),
+    0
+  );
+
+  let assigned = 0;
+  for (let i = 0; i < acts.length; i++) {
+    const words =
+      "script_text" in acts[i]
+        ? (acts[i] as unknown as { script_text: string }).script_text.split(
+            /\s+/
+          ).length
+        : 1;
+    if (i === acts.length - 1) {
+      acts[i].scene_count = totalScenes - assigned;
+    } else {
+      acts[i].scene_count = Math.max(
+        1,
+        Math.round((words / totalWords) * totalScenes)
+      );
+      assigned += acts[i].scene_count;
+    }
   }
 }

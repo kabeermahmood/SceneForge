@@ -3,7 +3,7 @@ import { getGeminiClient } from "@/lib/gemini";
 
 export async function POST(request: NextRequest) {
   try {
-    const { scenePrompts, apiKey, model } = await request.json();
+    const { scenePrompts, apiKey, model, referenceImage } = await request.json();
 
     if (!Array.isArray(scenePrompts) || scenePrompts.length === 0) {
       return NextResponse.json(
@@ -22,18 +22,43 @@ export async function POST(request: NextRequest) {
     const selectedModel = model && typeof model === "string" ? model : "gemini-2.5-flash-image";
     const genAI = getGeminiClient(apiKey);
 
+    const hasRef = referenceImage && typeof referenceImage === "object" && referenceImage.data;
+    if (hasRef) {
+      console.log(
+        `[SceneForge] BATCH API — Reference image attached (${Math.round(referenceImage.data.length / 1024)}KB)`
+      );
+    }
+
     const inlinedRequests = scenePrompts.map(
-      (sp: { key: string; prompt: string }) => ({
-        contents: [{ role: "user" as const, parts: [{ text: sp.prompt }] }],
-        config: {
-          responseModalities: ["image", "text"],
-        },
-        metadata: { key: sp.key },
-      })
+      (sp: { key: string; prompt: string }) => {
+        const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [];
+
+        if (hasRef) {
+          parts.push({
+            inlineData: {
+              mimeType: referenceImage.mimeType || "image/png",
+              data: referenceImage.data,
+            },
+          });
+          parts.push({
+            text: `[REFERENCE SCREENSHOT ABOVE]: This is Scene 1 from the animated video. Your generated image MUST match this reference exactly — same characters, same art style, same colors, same line weight. Generate a SINGLE fullscreen scene that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames, NO margins, NO white space. One continuous scene like a movie screenshot.\n\n${sp.prompt}`,
+          });
+        } else {
+          parts.push({ text: sp.prompt });
+        }
+
+        return {
+          contents: [{ role: "user" as const, parts }],
+          config: {
+            responseModalities: ["image", "text"],
+          },
+          metadata: { key: sp.key },
+        };
+      }
     );
 
     console.log(
-      `[SceneForge] BATCH API — Model: ${selectedModel}, Scenes: ${scenePrompts.length}, Est. cost: ~$${(scenePrompts.length * 0.0195).toFixed(3)}`
+      `[SceneForge] BATCH API — Model: ${selectedModel}, Scenes: ${scenePrompts.length}, Ref: ${hasRef ? "yes" : "no"}, Est. cost: ~$${(scenePrompts.length * 0.0195).toFixed(3)}`
     );
 
     const batchJob = await genAI.batches.create({

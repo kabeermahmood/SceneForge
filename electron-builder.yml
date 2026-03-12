@@ -1,0 +1,24 @@
+appId: com.sceneforge.desktop
+productName: SceneForge
+
+directories:
+  output: dist-electron
+
+files:
+  - electron/**/*
+  - package.json
+
+extraResources:
+  - from: ".next/standalone"
+    to: "standalone"
+    filter:
+      - "**/*"
+
+win:
+  target: nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerSidebar: null
+  uninstallerSidebar: null
