@@ -40,6 +40,8 @@ export default function ProgressTracker({
       ? `Generating Scene Images (${completedCount}/${totalScenes})`
       : "Generating Scene Images (0/0)";
 
+  const isPostHero = pipelineStage === "hero_review" || pipelineStage === "generating_images" || pipelineStage === "complete";
+
   const steps: Step[] = [
     {
       label: "Analyzing Script & Creating Character Bible",
@@ -64,9 +66,9 @@ export default function ProgressTracker({
       state:
         pipelineStage === "generating_images" && heroGenerating && !heroComplete
           ? "active"
-          : heroComplete
+          : heroComplete || pipelineStage === "hero_review"
             ? "complete"
-            : pipelineStage === "generating_images" || pipelineStage === "complete"
+            : isPostHero
               ? "complete"
               : "pending",
     },

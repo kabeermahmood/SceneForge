@@ -60,6 +60,13 @@ export const IMAGE_MODELS: ImageModelOption[] = [
     supportsBatch: true,
     costPerImage: 0.134,
   },
+  {
+    id: "gemini-2.0-flash-exp-image-generation",
+    label: "Gemini 2.0 Flash Exp (Free)",
+    description: "Lower quality, free tier — great for drafts & testing",
+    supportsBatch: false,
+    costPerImage: 0,
+  },
 ];
 
 export interface ProjectState {
@@ -78,6 +85,7 @@ export interface ProjectState {
     | "generating_bible"
     | "chunking"
     | "generating_images"
+    | "hero_review"
     | "complete"
     | "error";
   current_scene_index: number;
