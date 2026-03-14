@@ -16,6 +16,7 @@ import {
   Palette,
   CheckCircle2,
   Loader2,
+  Pencil,
 } from "lucide-react";
 import { IMAGE_MODELS } from "@/lib/types";
 import { useProjectStore } from "@/store/useProjectStore";
@@ -47,6 +48,8 @@ function HomeContent() {
   const [batchMode, setBatchMode] = useState(false);
   const [batchState, setBatchState] = useState<string>("");
   const [pollCount, setPollCount] = useState(0);
+  const [heroEditMode, setHeroEditMode] = useState(false);
+  const [heroEditDescription, setHeroEditDescription] = useState("");
   const cancelledRef = useRef(false);
   const switchToStandardRef = useRef(false);
   const sceneTimesRef = useRef<number[]>([]);
@@ -194,6 +197,9 @@ function HomeContent() {
           status: "pending" as const,
           generation_prompt: "",
           error_message: null,
+          animation_prompt: null,
+          camera_movement: null,
+          suggested_transition: null,
         })
       );
       setScenes(newScenes);
@@ -213,7 +219,7 @@ function HomeContent() {
       const scenePrompts = newScenes.map(
         (scene: SceneInput, i: number) => {
           const prompt = buildSceneImagePrompt(
-            { ...scene, image_base64: null, image_mime_type: null, status: "pending", generation_prompt: "", error_message: null },
+            { ...scene, image_base64: null, image_mime_type: null, status: "pending", generation_prompt: "", error_message: null, animation_prompt: null, camera_movement: null, suggested_transition: null },
             newScenes.length,
             bible,
             artStylePrompt,
@@ -620,7 +626,7 @@ function HomeContent() {
   }, [setPipelineStage, setErrorMessage, updateScene, setCurrentSceneIndex]);
 
   // ====== Regenerate hero frame with new art style ======
-  const regenerateHero = useCallback(async () => {
+  const regenerateHero = useCallback(async (editedDescription?: string) => {
     const ctx = heroContextRef.current;
     if (!ctx) return;
 
@@ -635,8 +641,16 @@ function HomeContent() {
     const scene = state.scenes[0];
     if (!scene) return;
 
+    const sceneForPrompt = editedDescription
+      ? { ...scene, scene_description: editedDescription }
+      : scene;
+
+    if (editedDescription) {
+      updateScene(0, { scene_description: editedDescription });
+    }
+
     const newPrompt = buildSceneImagePrompt(
-      scene,
+      sceneForPrompt,
       state.scenes.length,
       state.character_bible!,
       newArtStylePrompt,
@@ -738,7 +752,11 @@ function HomeContent() {
         scene_description: newDescription,
         status: "generating",
         error_message: null,
+        animation_prompt: null,
+        camera_movement: null,
+        suggested_transition: null,
       });
+      useProjectStore.getState().setAnimationPromptsGenerated(false);
 
       const updatedScene = { ...scene, scene_description: newDescription };
       const artStylePrompt = getArtStylePrompt();
@@ -1008,6 +1026,55 @@ function HomeContent() {
             </div>
           </div>
 
+          {/* Scene Description Editor */}
+          <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            <button
+              onClick={() => {
+                if (!heroEditMode && heroScene) {
+                  setHeroEditDescription(heroScene.scene_description);
+                }
+                setHeroEditMode(!heroEditMode);
+              }}
+              className="flex w-full items-center justify-between border-b border-border px-5 py-3 text-left transition-colors hover:bg-accent/5"
+            >
+              <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
+                <Pencil size={14} className="text-accent" />
+                Edit Scene Description
+              </h3>
+              <span className="text-xs text-text-secondary">
+                {heroEditMode ? "Collapse" : "Expand to edit"}
+              </span>
+            </button>
+
+            {heroEditMode && (
+              <div className="space-y-3 p-5">
+                <p className="text-xs text-text-secondary">
+                  Modify the visual description that guides image generation. Changes apply on next regeneration.
+                </p>
+                <textarea
+                  value={heroEditDescription}
+                  onChange={(e) => setHeroEditDescription(e.target.value)}
+                  rows={5}
+                  className="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/40 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  placeholder="Describe the visual scene..."
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-text-secondary/60">
+                    {heroEditDescription.length} characters
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (heroScene) setHeroEditDescription(heroScene.scene_description);
+                    }}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    Reset to original
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Art Style & Model selector */}
           <div className="space-y-4 rounded-xl border border-border bg-surface p-5">
             <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
@@ -1023,12 +1090,19 @@ function HomeContent() {
           {/* Action buttons */}
           <div className="flex flex-col gap-3 sm:flex-row">
             <button
-              onClick={regenerateHero}
+              onClick={() => {
+                const edited = heroEditMode && heroEditDescription.trim().length > 0
+                  && heroEditDescription !== heroScene?.scene_description
+                  ? heroEditDescription.trim()
+                  : undefined;
+                regenerateHero(edited);
+                setHeroEditMode(false);
+              }}
               disabled={heroGenerating}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-accent/30 bg-surface py-4 text-sm font-bold text-accent transition-all hover:border-accent hover:bg-accent/5 disabled:opacity-40"
             >
               <RefreshCw size={18} className={heroGenerating ? "animate-spin" : ""} />
-              {heroGenerating ? "Regenerating..." : "Regenerate Hero Frame"}
+              {heroGenerating ? "Regenerating..." : heroEditMode && heroEditDescription !== heroScene?.scene_description ? "Regenerate with Edits" : "Regenerate Hero Frame"}
             </button>
 
             <button

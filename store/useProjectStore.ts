@@ -21,6 +21,8 @@ interface ProjectActions {
   setPipelineStage: (stage: ProjectState["pipeline_stage"]) => void;
   setCurrentSceneIndex: (index: number) => void;
   setErrorMessage: (message: string | null) => void;
+  setAnimationPromptsGenerated: (val: boolean) => void;
+  setAnimationPromptModel: (model: string) => void;
   resetProject: () => void;
 }
 
@@ -38,6 +40,8 @@ const initialState: ProjectState = {
   pipeline_stage: "idle",
   current_scene_index: 0,
   error_message: null,
+  animation_prompts_generated: false,
+  animation_prompt_model: "gemini-2.5-flash",
 };
 
 export const useProjectStore = create<ProjectState & ProjectActions>(
@@ -63,6 +67,8 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setPipelineStage: (stage) => set({ pipeline_stage: stage }),
     setCurrentSceneIndex: (index) => set({ current_scene_index: index }),
     setErrorMessage: (message) => set({ error_message: message }),
+    setAnimationPromptsGenerated: (val) => set({ animation_prompts_generated: val }),
+    setAnimationPromptModel: (model) => set({ animation_prompt_model: model }),
     resetProject: () => set(initialState),
   })
 );
