@@ -1,4 +1,4 @@
-import type { Character, CharacterBible, Scene } from "./types";
+import type { Character, CharacterBible, Scene, TextModelOption } from "./types";
 
 export function buildCharacterBiblePrompt(script: string): string {
   return `You are an expert animation character designer and story analyst.
@@ -207,17 +207,25 @@ CHARACTER: ${c.name}
 
   return `Generate a SINGLE scene screenshot from a 2D animated video. This is ONE continuous image — NOT a comic, NOT panels, NOT framed artwork. Think of it as a direct screenshot from an animated movie playing fullscreen on a TV.
 
-⛔ ABSOLUTELY FORBIDDEN — the image must NOT contain any of these:
-- Multiple panels, split panels, comic strip layouts, or side-by-side images
+⛔⛔⛔ CRITICAL — READ THIS FIRST ⛔⛔⛔
+The #1 rule: generate ONE image with ONE scene. If the output contains more than one panel, frame, or viewpoint, it is IMMEDIATELY REJECTED.
+
+ABSOLUTELY FORBIDDEN — if ANY of these appear the image is invalid:
+- TWO OR MORE PANELS stacked vertically, horizontally, or in any grid/comic layout
+- MULTIPLE VIEWPOINTS or camera angles combined into one image (e.g. wide shot on top, close-up on bottom)
+- SPLIT COMPOSITIONS showing the same character from different angles or at different moments
+- STORYBOARD LAYOUTS with 2, 3, or more frames showing a sequence
+- COMIC STRIP FORMAT with any kind of panel dividers, gutters, or borders between sections
+- Horizontal lines, bars, or dividers splitting the image into sections
 - Black outlines, borders, or frames around the scene
 - White, cream, or beige margins/padding around the edges
-- Vignettes (circular, oval, or rounded frames)
-- Decorative borders, panel borders, or any kind of border
-- Any empty/blank space at the top, bottom, left, or right edges
-The scene background MUST touch all 4 edges of the generated image directly. No exceptions.
+- Vignettes, circular frames, or decorative borders
+- Any empty/blank space at any edge
+
+The ONLY acceptable output is: ONE single continuous scene filling 100% of the canvas with ONE camera angle, ONE moment in time, ONE composition. The background extends edge-to-edge like a widescreen movie frame.
 
 === FORMAT ===
-Output: A single ${aspectRatio} image where the painted scene extends to every pixel of the canvas edge — exactly like a pause frame from a Netflix animated show.
+Output: A single ${aspectRatio} image. ONE scene. ONE moment. ONE camera angle. The painted scene extends to every pixel of the canvas — exactly like pausing an animated movie on fullscreen.
 
 === VISUAL DNA (applies to ALL ${totalScenes} screenshots) ===
 Art Style: ${artStylePrompt}
@@ -242,7 +250,7 @@ Characters Present: ${scene.characters_present.join(", ")}
 6. ZERO TEXT: No words, numbers, letters, watermarks, speech bubbles, captions, or UI overlays.
 7. CONTINUITY: Screenshot ${scene.chunk_index} of ${totalScenes}. Seamless visual continuity across all screenshots.
 
-Generate this single fullscreen scene now.`;
+FINAL REMINDER: Generate EXACTLY ONE image. NOT a comic. NOT panels. NOT a storyboard. ONE single scene, like a movie screenshot. Generate now.`;
 }
 
 /**
@@ -277,4 +285,59 @@ function extractFingerprint(character: Character): string {
   }
 
   return features.join(", ");
+}
+
+export function buildAnimationPromptsPrompt(
+  script: string,
+  bible: CharacterBible,
+  scenes: { chunk_index: number; script_text: string; scene_description: string; scene_emotion: string; characters_present: string[] }[],
+  secondsPerScene: number
+): string {
+  const sceneList = scenes.map((s) => {
+    const scriptExcerpt = s.script_text.length > 200 ? s.script_text.slice(0, 200) + "..." : s.script_text;
+    return `Scene ${s.chunk_index}:
+  Script: "${scriptExcerpt}"
+  Description: ${s.scene_description}
+  Emotion: ${s.scene_emotion}
+  Characters: ${s.characters_present.join(", ") || "none"}`;
+  }).join("\n\n");
+
+  return `You are an expert animation director writing video-generation prompts. The user has a still image for each scene from an animated video. They will paste your prompt into an AI video generator (Grok, Kling, or Runway) alongside each scene image to convert it into an ${secondsPerScene}-second animated video clip.
+
+=== CHARACTER BIBLE ===
+${bible.characters.map((c) => `- ${c.name} (${c.type}): ${c.appearance}. Pose: ${c.default_pose}`).join("\n")}
+Setting: ${bible.primary_setting}
+Mood: ${bible.overall_mood}
+
+=== FULL SCRIPT (for narrative context) ===
+${script.length > 3000 ? script.slice(0, 3000) + "\n...[truncated]" : script}
+
+=== SCENES ===
+${sceneList}
+
+=== YOUR TASK ===
+For each scene, write a concise animation prompt (MAX 80 words) that describes ONLY motion and timing for an ${secondsPerScene}-second video clip. The still image already shows all visual details — do NOT describe appearance, colors, or art style.
+
+EVERY prompt MUST start with:
+"Using the provided image as the exact reference frame — maintain identical character designs, colors, art style, and proportions throughout the ${secondsPerScene}-second clip."
+
+Then describe:
+1. CHARACTER ACTIONS — real movement: walking, running, turning heads, gesturing, jumping, reaching, blinking, tail wagging, etc. Make the characters feel alive.
+2. CAMERA MOVEMENT — zoom, pan, dolly, tilt, tracking shot, static, etc.
+3. BACKGROUND/ENVIRONMENT MOTION — wind, water, light shifts, particles, swaying trees, flickering, floating objects, etc.
+4. PACING — must match the scene emotion:
+   - High-energy scenes (action, excitement, conflict): fast camera moves, dynamic character actions, quick environment changes
+   - Calm scenes (reflection, sadness, wonder): slower drifts, subtle animations, ambient motion
+   - Surprise/revelation: start slow then accelerate, or a sudden movement
+
+=== OUTPUT FORMAT ===
+Return a JSON array. Each element:
+{
+  "chunk_index": <number>,
+  "animation_prompt": "<string, max 80 words, starts with reference frame instruction>",
+  "camera_movement": "<string, e.g. 'Slow dolly-in with slight tilt up'>",
+  "suggested_transition": "<string, e.g. 'Crossfade', 'Hard cut', 'Match cut', 'Fade to black'>"
+}
+
+Return ONLY the JSON array, no markdown, no extra text.`;
 }
