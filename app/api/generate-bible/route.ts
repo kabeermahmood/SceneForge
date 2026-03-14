@@ -5,7 +5,7 @@ import type { CharacterBible } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, apiKey } = await request.json();
+    const { script, apiKey, model } = await request.json();
 
     if (!script || typeof script !== "string" || script.length < 100) {
       return NextResponse.json(
@@ -31,12 +31,13 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildCharacterBiblePrompt(script);
 
+    const textModel = typeof model === "string" && model ? model : "gemini-2.5-flash";
+
     let bible: CharacterBible;
     try {
-      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey);
+      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel);
     } catch {
-      // Retry once on JSON parse failure
-      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey);
+      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel);
     }
 
     return NextResponse.json(bible);

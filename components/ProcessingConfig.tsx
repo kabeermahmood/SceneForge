@@ -1,7 +1,7 @@
 "use client";
 
 import { useProjectStore } from "@/store/useProjectStore";
-import { IMAGE_MODELS, type ProcessingMode } from "@/lib/types";
+import { IMAGE_MODELS, TEXT_MODELS, type ProcessingMode } from "@/lib/types";
 import {
   Zap,
   Clock,
@@ -9,6 +9,7 @@ import {
   DollarSign,
   Image as ImageIcon,
   Calculator,
+  MessageSquareText,
 } from "lucide-react";
 
 const MODES: {
@@ -41,10 +42,13 @@ export default function ProcessingConfig() {
   const setProcessingMode = useProjectStore((s) => s.setProcessingMode);
   const imageModel = useProjectStore((s) => s.image_model);
   const setImageModel = useProjectStore((s) => s.setImageModel);
+  const textModel = useProjectStore((s) => s.text_model);
+  const setTextModel = useProjectStore((s) => s.setTextModel);
   const durationSeconds = useProjectStore((s) => s.duration_seconds);
   const secondsPerScene = useProjectStore((s) => s.seconds_per_scene);
 
   const selectedModel = IMAGE_MODELS.find((m) => m.id === imageModel);
+  const selectedTextModel = TEXT_MODELS.find((m) => m.id === textModel);
   const sceneCount = Math.max(
     4,
     Math.min(Math.round(durationSeconds / secondsPerScene), 100)
@@ -124,6 +128,34 @@ export default function ProcessingConfig() {
         </div>
         <p className="mt-2 text-xs text-text-secondary">
           {selectedModel?.description}
+        </p>
+      </div>
+
+      {/* Text Model Selector */}
+      <div>
+        <label className="mb-2 flex items-center gap-2 font-heading text-sm font-medium text-text-secondary">
+          <MessageSquareText size={14} />
+          Text Model (Bible & Chunking)
+        </label>
+        <div className="relative">
+          <select
+            value={textModel}
+            onChange={(e) => setTextModel(e.target.value)}
+            className="w-full appearance-none rounded-lg border border-border bg-surface px-4 py-3 pr-10 text-sm text-text-primary focus:border-accent focus:ring-2 focus:ring-accent/20"
+          >
+            {TEXT_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.costPer1MTokens === 0 ? "Free" : `$${m.costPer1MTokens}/1M tokens`}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={16}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary"
+          />
+        </div>
+        <p className="mt-2 text-xs text-text-secondary">
+          {selectedTextModel?.description}
         </p>
       </div>
 

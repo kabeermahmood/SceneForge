@@ -12,7 +12,8 @@ const FALLBACK_MODELS = [
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, apiKey, model, referenceImage } = await request.json();
+    const { prompt, apiKey, model, referenceImage, aspectRatio } = await request.json();
+    const imageAspectRatio = typeof aspectRatio === "string" && aspectRatio ? aspectRatio : "16:9";
 
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json(
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
             contents: [{ role: "user", parts }],
             config: {
               responseModalities: ["image", "text"],
+              imageConfig: { aspectRatio: imageAspectRatio },
             },
           });
 

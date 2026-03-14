@@ -15,6 +15,7 @@ interface ProjectActions {
   setSecondsPerScene: (seconds: number) => void;
   setProcessingMode: (mode: ProcessingMode) => void;
   setImageModel: (model: string) => void;
+  setTextModel: (model: string) => void;
   setCharacterBible: (bible: CharacterBible) => void;
   setScenes: (scenes: Scene[]) => void;
   updateScene: (index: number, updates: Partial<Scene>) => void;
@@ -33,6 +34,7 @@ const initialState: ProjectState = {
   seconds_per_scene: 8,
   processing_mode: "batch",
   image_model: "gemini-2.5-flash-image",
+  text_model: "gemini-2.5-flash",
   character_bible: null,
   scenes: [],
   pipeline_stage: "idle",
@@ -52,6 +54,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setSecondsPerScene: (seconds) => set({ seconds_per_scene: seconds }),
     setProcessingMode: (mode) => set({ processing_mode: mode }),
     setImageModel: (model) => set({ image_model: model }),
+    setTextModel: (model) => set({ text_model: model }),
     setCharacterBible: (bible) => set({ character_bible: bible }),
     setScenes: (scenes) => set({ scenes }),
     updateScene: (index, updates) =>

@@ -8,12 +8,13 @@ export function getGeminiClient(apiKey?: string) {
 
 export async function geminiTextToJSON<T>(
   prompt: string,
-  apiKey?: string
+  apiKey?: string,
+  model: string = "gemini-2.5-flash"
 ): Promise<T> {
   const genAI = getGeminiClient(apiKey);
 
   const result = await genAI.models.generateContent({
-    model: "gemini-2.5-flash",
+    model,
     contents: [{ role: "user", parts: [{ text: prompt }] }],
   });
 

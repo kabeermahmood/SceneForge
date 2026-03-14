@@ -11,9 +11,17 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FileText,
+  Play,
+  RefreshCw,
+  Palette,
+  CheckCircle2,
+  Loader2,
+  Pencil,
+  Wand2,
+  BookOpen,
 } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
-import { ART_STYLES } from "@/lib/types";
+import { ART_STYLES, IMAGE_MODELS } from "@/lib/types";
 import { buildSceneImagePrompt } from "@/lib/prompts";
 import { SAMPLE_SCRIPT } from "@/lib/utils";
 import ScriptInput from "@/components/ScriptInput";
@@ -41,9 +49,20 @@ function HomeContent() {
   const [batchMode, setBatchMode] = useState(false);
   const [batchState, setBatchState] = useState<string>("");
   const [pollCount, setPollCount] = useState(0);
+  const [heroEditMode, setHeroEditMode] = useState(false);
+  const [heroEditDescription, setHeroEditDescription] = useState("");
+  const [heroRegeneratingPrompt, setHeroRegeneratingPrompt] = useState(false);
+  const [heroUserGuidance, setHeroUserGuidance] = useState("");
+  const [regeneratingBible, setRegeneratingBible] = useState(false);
   const cancelledRef = useRef(false);
   const switchToStandardRef = useRef(false);
   const sceneTimesRef = useRef<number[]>([]);
+  const heroContextRef = useRef<{
+    scenePrompts: { key: string; prompt: string }[];
+    heroImage: { data: string; mimeType: string } | null;
+    currentModel: string;
+    apiKey: string;
+  } | null>(null);
 
   const script = useProjectStore((s) => s.script);
   const setScript = useProjectStore((s) => s.setScript);
@@ -63,6 +82,7 @@ function HomeContent() {
   const secondsPerScene = useProjectStore((s) => s.seconds_per_scene);
   const processingMode = useProjectStore((s) => s.processing_mode);
   const imageModel = useProjectStore((s) => s.image_model);
+  const textModel = useProjectStore((s) => s.text_model);
   const setScenes = useProjectStore((s) => s.setScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
   const setCurrentSceneIndex = useProjectStore((s) => s.setCurrentSceneIndex);
@@ -134,7 +154,7 @@ function HomeContent() {
       const bibleRes = await fetch("/api/generate-bible", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script, apiKey }),
+        body: JSON.stringify({ script, apiKey, model: textModel }),
       });
       if (!bibleRes.ok) {
         const err = await bibleRes.json();
@@ -157,7 +177,7 @@ function HomeContent() {
       const chunkRes = await fetch("/api/chunk-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script, chunksCount, apiKey }),
+        body: JSON.stringify({ script, chunksCount, apiKey, model: textModel }),
       });
       if (!chunkRes.ok) {
         const err = await chunkRes.json();
@@ -228,6 +248,7 @@ function HomeContent() {
             prompt: scenePrompts[0].prompt,
             apiKey,
             model: currentModel,
+            aspectRatio,
           }),
         });
 
@@ -257,6 +278,51 @@ function HomeContent() {
 
       if (cancelledRef.current) { setPipelineStage("complete"); return; }
 
+      // ── PAUSE: Save context and let user review the hero frame ──
+      heroContextRef.current = { scenePrompts, heroImage, currentModel, apiKey };
+      setPipelineStage("hero_review");
+      return;
+
+    } catch (err: unknown) {
+      const hasAnyScenes = useProjectStore.getState().scenes.some(
+        (s) => s.status === "completed" || s.status === "approved"
+      );
+      if (hasAnyScenes) {
+        console.warn("[SceneForge] Pipeline error, showing partial results:", err);
+        setPipelineStage("complete");
+      } else {
+        setPipelineStage("error");
+        setErrorMessage(
+          err instanceof Error ? err.message : "An unexpected error occurred"
+        );
+      }
+    }
+  }, [
+    script,
+    durationSeconds,
+    secondsPerScene,
+    aspectRatio,
+    processingMode,
+    imageModel,
+    textModel,
+    getArtStylePrompt,
+    setPipelineStage,
+    setErrorMessage,
+    setCharacterBible,
+    setScenes,
+    updateScene,
+    setCurrentSceneIndex,
+  ]);
+
+  // ====== Continue generating remaining scenes after hero approval ======
+  const continueAfterHero = useCallback(async () => {
+    const ctx = heroContextRef.current;
+    if (!ctx) return;
+
+    const { scenePrompts, heroImage, currentModel, apiKey } = ctx;
+    setPipelineStage("generating_images");
+
+    try {
       // Remaining scenes (skip index 0 which was the hero frame)
       const remainingPrompts = scenePrompts.slice(1);
 
@@ -290,6 +356,7 @@ function HomeContent() {
               scenePrompts: sub.prompts,
               apiKey,
               model: currentModel,
+              aspectRatio: useProjectStore.getState().aspect_ratio,
             };
             if (heroImage) batchBody.referenceImage = heroImage;
 
@@ -413,6 +480,7 @@ function HomeContent() {
                   prompt: item.prompt,
                   apiKey,
                   model: currentModel,
+                  aspectRatio: useProjectStore.getState().aspect_ratio,
                 };
                 if (heroImage) reqBody.referenceImage = heroImage;
 
@@ -466,6 +534,7 @@ function HomeContent() {
               prompt: remainingPrompts[localIdx].prompt,
               apiKey,
               model: currentModel,
+              aspectRatio: useProjectStore.getState().aspect_ratio,
             };
             if (heroImage) reqBody.referenceImage = heroImage;
 
@@ -526,46 +595,232 @@ function HomeContent() {
       setBatchMode(false);
       setPipelineStage("complete");
     } catch (err: unknown) {
-      const hasAnyScenes = useProjectStore.getState().scenes.length > 0;
       const hasAnyCompleted = useProjectStore.getState().scenes.some(
         (s) => s.status === "completed" || s.status === "approved"
       );
-
       if (hasAnyCompleted) {
-        // We have results — go to complete view so user keeps their progress
-        console.warn("[SceneForge] Pipeline error, but preserving completed scenes:", err);
-        setEta(null);
-        setBatchMode(false);
-        setPipelineStage("complete");
-      } else if (hasAnyScenes) {
-        // We have scenes but no images — still show complete so user can retry individual scenes
-        console.warn("[SceneForge] Pipeline error during image gen, showing partial results:", err);
+        console.warn("[SceneForge] Pipeline error, preserving completed scenes:", err);
         setEta(null);
         setBatchMode(false);
         setPipelineStage("complete");
       } else {
-        // Failed before any scenes were created (bible/chunking failure) — show error screen
         setPipelineStage("error");
-        setErrorMessage(
-          err instanceof Error ? err.message : "An unexpected error occurred"
-        );
+        setErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred");
       }
     }
-  }, [
-    script,
-    durationSeconds,
-    secondsPerScene,
-    aspectRatio,
-    processingMode,
-    imageModel,
-    getArtStylePrompt,
-    setPipelineStage,
-    setErrorMessage,
-    setCharacterBible,
-    setScenes,
-    updateScene,
-    setCurrentSceneIndex,
-  ]);
+  }, [setPipelineStage, setErrorMessage, updateScene, setCurrentSceneIndex, processingMode, imageModel, getArtStylePrompt, aspectRatio]);
+
+  // ====== Regenerate hero frame (with optional edited description) ======
+  const regenerateHero = useCallback(async (editedDescription?: string) => {
+    const ctx = heroContextRef.current;
+    if (!ctx) return;
+
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    const state = useProjectStore.getState();
+    const newArtStylePrompt = state.art_style === "custom"
+      ? state.art_style_custom
+      : ART_STYLES.find((s) => s.id === state.art_style)?.prompt_text || "";
+
+    const scene = state.scenes[0];
+    if (!scene) return;
+
+    const sceneForPrompt = editedDescription
+      ? { ...scene, scene_description: editedDescription }
+      : scene;
+
+    if (editedDescription) {
+      updateScene(0, { scene_description: editedDescription });
+    }
+
+    const newPrompt = buildSceneImagePrompt(
+      sceneForPrompt,
+      state.scenes.length,
+      state.character_bible!,
+      newArtStylePrompt,
+      state.aspect_ratio
+    );
+
+    updateScene(0, { status: "generating", error_message: null, generation_prompt: newPrompt });
+    setPipelineStage("generating_images");
+
+    try {
+      const heroRes = await fetch("/api/generate-scene", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: newPrompt, apiKey, model: state.image_model, aspectRatio: state.aspect_ratio }),
+      });
+
+      if (heroRes.ok) {
+        const heroData = await heroRes.json();
+        if (heroData.image_base64) {
+          const newHeroImage = { data: heroData.image_base64, mimeType: heroData.mime_type || "image/png" };
+          heroContextRef.current = { ...ctx, heroImage: newHeroImage, currentModel: state.image_model };
+          ctx.scenePrompts[0] = { key: ctx.scenePrompts[0].key, prompt: newPrompt };
+          updateScene(0, {
+            image_base64: heroData.image_base64,
+            image_mime_type: heroData.mime_type,
+            status: "completed",
+          });
+        }
+      } else {
+        const err = await heroRes.json();
+        updateScene(0, { status: "failed", error_message: err.message || "Hero regeneration failed" });
+      }
+    } catch (err: unknown) {
+      updateScene(0, {
+        status: "failed",
+        error_message: err instanceof Error ? err.message : "Hero regeneration failed",
+      });
+    }
+
+    setPipelineStage("hero_review");
+  }, [updateScene, setPipelineStage]);
+
+  // ====== AI-powered scene description regeneration ======
+  const regenerateHeroDescription = useCallback(async (guidance?: string) => {
+    const apiKey = getApiKey();
+    const state = useProjectStore.getState();
+    const scene = state.scenes[0];
+    const bible = state.character_bible;
+    if (!scene || !bible || !apiKey) return;
+
+    setHeroRegeneratingPrompt(true);
+
+    try {
+      const res = await fetch("/api/regenerate-description", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scriptText: scene.script_text,
+          currentDescription: scene.scene_description,
+          characterBible: bible,
+          userGuidance: guidance || "",
+          apiKey,
+          model: useProjectStore.getState().text_model,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.description) {
+          setHeroEditDescription(data.description);
+          updateScene(0, { scene_description: data.description });
+          setHeroEditMode(true);
+        }
+      } else {
+        const err = await res.json();
+        console.error("[SceneForge] Description regeneration failed:", err.message);
+      }
+    } catch (err: unknown) {
+      console.error("[SceneForge] Description regeneration error:", err);
+    }
+
+    setHeroRegeneratingPrompt(false);
+  }, [updateScene]);
+
+  // ====== Regenerate Character Bible + re-chunk + regenerate hero ======
+  const regenerateBibleAndHero = useCallback(async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    setRegeneratingBible(true);
+    const state = useProjectStore.getState();
+
+    try {
+      setPipelineStage("generating_bible");
+
+      const bibleRes = await fetch("/api/generate-bible", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script: state.script, apiKey, model: state.text_model }),
+      });
+      if (!bibleRes.ok) {
+        const err = await bibleRes.json();
+        throw new Error(err.message || "Failed to regenerate Character Bible");
+      }
+      const newBible = await bibleRes.json();
+      setCharacterBible(newBible);
+
+      setPipelineStage("chunking");
+      const chunksCount = Math.max(
+        4,
+        Math.min(Math.round(state.duration_seconds / state.seconds_per_scene), 100)
+      );
+
+      const chunkRes = await fetch("/api/chunk-script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script: state.script, chunksCount, apiKey, model: state.text_model }),
+      });
+      if (!chunkRes.ok) {
+        const err = await chunkRes.json();
+        throw new Error(err.message || "Failed to re-chunk script");
+      }
+      const chunkData = await chunkRes.json();
+      const newScenes = chunkData.scenes.map(
+        (s: { chunk_index: number; script_text: string; scene_description: string; scene_emotion: string; characters_present: string[] }) => ({
+          chunk_index: s.chunk_index,
+          script_text: s.script_text,
+          scene_description: s.scene_description,
+          scene_emotion: s.scene_emotion,
+          characters_present: s.characters_present,
+          image_base64: null,
+          image_mime_type: null,
+          status: "pending" as const,
+          generation_prompt: "",
+          error_message: null,
+        })
+      );
+      setScenes(newScenes);
+
+      setPipelineStage("generating_images");
+      const artStylePrompt = getArtStylePrompt();
+      const currentModel = state.image_model;
+
+      const scenePrompts = newScenes.map(
+        (scene: { chunk_index: number; scene_description: string; scene_emotion: string; characters_present: string[]; script_text: string }, i: number) => {
+          const prompt = buildSceneImagePrompt(
+            { ...scene, image_base64: null, image_mime_type: null, status: "pending" as const, generation_prompt: "", error_message: null },
+            newScenes.length,
+            newBible,
+            artStylePrompt,
+            state.aspect_ratio
+          );
+          updateScene(i, { generation_prompt: prompt, status: "generating" });
+          return { key: `scene-${String(scene.chunk_index).padStart(2, "0")}`, prompt };
+        }
+      );
+
+      setCurrentSceneIndex(0);
+      const heroRes = await fetch("/api/generate-scene", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: scenePrompts[0].prompt, apiKey, model: currentModel, aspectRatio: state.aspect_ratio }),
+      });
+
+      let heroImage: { data: string; mimeType: string } | null = null;
+      if (heroRes.ok) {
+        const heroData = await heroRes.json();
+        if (heroData.image_base64) {
+          heroImage = { data: heroData.image_base64, mimeType: heroData.mime_type || "image/png" };
+          updateScene(0, { image_base64: heroData.image_base64, image_mime_type: heroData.mime_type, status: "completed" });
+        }
+      } else {
+        const err = await heroRes.json();
+        updateScene(0, { status: "failed", error_message: err.message || "Hero frame failed" });
+      }
+
+      heroContextRef.current = { scenePrompts, heroImage, currentModel, apiKey };
+      setPipelineStage("hero_review");
+    } catch (err: unknown) {
+      setPipelineStage("hero_review");
+      console.error("[SceneForge] Bible regeneration error:", err);
+    }
+
+    setRegeneratingBible(false);
+  }, [setPipelineStage, setCharacterBible, setScenes, updateScene, setCurrentSceneIndex, getArtStylePrompt]);
 
   // ====== Scene action handlers ======
   const handleRegenerate = useCallback(
@@ -581,7 +836,7 @@ function HomeContent() {
         const imgRes = await fetch("/api/generate-scene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: scene.generation_prompt, apiKey, model: state.image_model }),
+          body: JSON.stringify({ prompt: scene.generation_prompt, apiKey, model: state.image_model, aspectRatio: state.aspect_ratio }),
         });
         if (!imgRes.ok) {
           const err = await imgRes.json();
@@ -637,7 +892,7 @@ function HomeContent() {
         const imgRes = await fetch("/api/generate-scene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, apiKey, model: state.image_model }),
+          body: JSON.stringify({ prompt, apiKey, model: state.image_model, aspectRatio: state.aspect_ratio }),
         });
         if (!imgRes.ok) {
           const err = await imgRes.json();
@@ -760,6 +1015,266 @@ function HomeContent() {
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
         />
+      </div>
+    );
+  }
+
+  // ====== HERO REVIEW STATE ======
+  if (pipelineStage === "hero_review") {
+    const heroScene = scenes[0];
+    const heroOk = heroScene && (heroScene.status === "completed" || heroScene.status === "approved") && heroScene.image_base64;
+    const heroFailed = heroScene && heroScene.status === "failed";
+    const heroGenerating = heroScene && heroScene.status === "generating";
+    const totalRemaining = Math.max(0, scenes.length - 1);
+    const selectedModel = IMAGE_MODELS.find((m) => m.id === imageModel);
+
+    return (
+      <div className="flex min-h-screen flex-col pb-12">
+        <header className="flex items-center justify-between py-8">
+          <div>
+            <h1 className="font-heading text-2xl font-bold text-accent">SceneForge</h1>
+            <p className="mt-1 text-xs text-text-secondary">
+              Review your hero frame before generating all scenes
+            </p>
+          </div>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-lg border border-border bg-surface p-3 text-text-secondary transition-colors hover:border-accent hover:text-accent"
+          >
+            <Settings size={20} />
+          </button>
+        </header>
+
+        <div className="mx-auto w-full max-w-3xl space-y-6">
+          {/* Status banner */}
+          <div className="flex items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-5 py-3">
+            <CheckCircle2 size={20} className="shrink-0 text-accent" />
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                Character Bible & Script Chunking Complete
+              </p>
+              <p className="text-xs text-text-secondary">
+                {scenes.length} scenes ready — review Scene 1 (hero frame) below before generating the rest
+              </p>
+            </div>
+          </div>
+
+          {/* Hero Frame Preview */}
+          <div className="overflow-hidden rounded-xl border-2 border-accent/40 bg-surface">
+            <div className="border-b border-border bg-accent/5 px-5 py-3">
+              <h2 className="font-heading text-base font-bold text-text-primary">
+                Scene 1 — Hero Reference Frame
+              </h2>
+              <p className="mt-0.5 text-xs text-text-secondary">
+                All remaining scenes will match this art style and visual consistency
+              </p>
+            </div>
+
+            <div className="p-5">
+              {heroOk ? (
+                <img
+                  src={`data:${heroScene.image_mime_type};base64,${heroScene.image_base64}`}
+                  alt="Hero Frame — Scene 1"
+                  className="w-full rounded-lg"
+                />
+              ) : heroGenerating ? (
+                <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-background">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={32} className="animate-spin text-accent" />
+                    <p className="text-xs text-text-secondary">Generating hero frame...</p>
+                  </div>
+                </div>
+              ) : heroFailed ? (
+                <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-error/5">
+                  <div className="text-center">
+                    <AlertTriangle size={32} className="mx-auto text-error/60" />
+                    <p className="mt-2 text-xs text-error">{heroScene.error_message || "Hero frame generation failed"}</p>
+                    <p className="mt-1 text-[11px] text-text-secondary">Try a different art style or model, then regenerate</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-background/50">
+                  <span className="text-sm text-text-secondary/40">No hero frame</span>
+                </div>
+              )}
+
+              {heroScene && (
+                <p className="mt-3 text-xs leading-relaxed text-text-secondary">
+                  {heroScene.script_text}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Scene Description Editor + AI Regeneration */}
+          <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            <button
+              onClick={() => {
+                if (!heroEditMode && heroScene) {
+                  setHeroEditDescription(heroScene.scene_description);
+                }
+                setHeroEditMode(!heroEditMode);
+              }}
+              className="flex w-full items-center justify-between border-b border-border px-5 py-3 text-left transition-colors hover:bg-accent/5"
+            >
+              <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
+                <Pencil size={14} className="text-accent" />
+                Edit Scene Prompt
+              </h3>
+              <span className="text-xs text-text-secondary">
+                {heroEditMode ? "Collapse" : "Expand to edit"}
+              </span>
+            </button>
+
+            {heroEditMode && (
+              <div className="space-y-4 p-5">
+                <p className="text-xs text-text-secondary">
+                  Modify the visual description that guides image generation, or let AI rewrite it for you.
+                </p>
+
+                <textarea
+                  value={heroEditDescription}
+                  onChange={(e) => setHeroEditDescription(e.target.value)}
+                  rows={5}
+                  className="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/40 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  placeholder="Describe the visual scene..."
+                />
+
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-text-secondary/60">
+                    {heroEditDescription.length} characters
+                  </p>
+                  <button
+                    onClick={() => { if (heroScene) setHeroEditDescription(heroScene.scene_description); }}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    Reset to original
+                  </button>
+                </div>
+
+                {/* AI Regeneration section */}
+                <div className="rounded-lg border border-dashed border-accent/30 bg-accent/5 p-4">
+                  <h4 className="flex items-center gap-2 text-xs font-semibold text-text-primary">
+                    <Wand2 size={14} className="text-accent" />
+                    AI-Powered Prompt Rewrite
+                  </h4>
+                  <p className="mt-1 text-[11px] text-text-secondary">
+                    Optionally describe what you want changed — or leave blank for a fresh take.
+                  </p>
+                  <textarea
+                    value={heroUserGuidance}
+                    onChange={(e) => setHeroUserGuidance(e.target.value)}
+                    rows={2}
+                    placeholder='e.g. "Make the scene more dramatic with low-angle lighting" or "Show the character from a closer angle"'
+                    className="mt-2 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/30 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  />
+                  <button
+                    onClick={() => regenerateHeroDescription(heroUserGuidance)}
+                    disabled={heroRegeneratingPrompt}
+                    className="mt-2 flex items-center gap-2 rounded-lg bg-accent/10 px-4 py-2 text-xs font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+                  >
+                    {heroRegeneratingPrompt ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Rewriting with AI...
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={14} />
+                        Rewrite Description with AI
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Art Style, Aspect Ratio & Model selector */}
+          <div className="space-y-4 rounded-xl border border-border bg-surface p-5">
+            <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
+              <Palette size={16} className="text-accent" />
+              Adjust Before Continuing
+            </h3>
+            <AspectRatioSelector />
+            <StyleSelector />
+            <ProcessingConfig />
+          </div>
+
+          {/* Regenerate Character Bible */}
+          <div className="overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/5">
+            <div className="px-5 py-4">
+              <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
+                <BookOpen size={16} className="text-amber-400" />
+                Not happy with the overall style?
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Regenerate the Character Bible to get fresh character designs, color palette, and setting descriptions. This will re-chunk the script and generate a new hero frame.
+              </p>
+              <button
+                onClick={regenerateBibleAndHero}
+                disabled={regeneratingBible || heroGenerating}
+                className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-semibold text-amber-400 transition-colors hover:bg-amber-500/20 disabled:opacity-40"
+              >
+                {regeneratingBible ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Regenerating Bible & Hero...
+                  </>
+                ) : (
+                  <>
+                    <BookOpen size={14} />
+                    Regenerate Character Bible & Hero
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={() => {
+                const edited = heroEditMode && heroEditDescription.trim().length > 0
+                  && heroEditDescription !== heroScene?.scene_description
+                  ? heroEditDescription.trim()
+                  : undefined;
+                regenerateHero(edited);
+                setHeroEditMode(false);
+              }}
+              disabled={heroGenerating || regeneratingBible}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-accent/30 bg-surface py-4 text-sm font-bold text-accent transition-all hover:border-accent hover:bg-accent/5 disabled:opacity-40"
+            >
+              <RefreshCw size={18} className={heroGenerating ? "animate-spin" : ""} />
+              {heroGenerating
+                ? "Regenerating..."
+                : heroEditMode && heroEditDescription !== heroScene?.scene_description
+                  ? "Regenerate with Edits"
+                  : "Regenerate Hero Frame"}
+            </button>
+
+            <button
+              onClick={continueAfterHero}
+              disabled={!heroOk || regeneratingBible}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent py-4 text-sm font-bold text-background transition-all hover:bg-accent-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Play size={18} />
+              Continue — Generate {totalRemaining} Remaining Scene{totalRemaining !== 1 ? "s" : ""}
+            </button>
+          </div>
+
+          {selectedModel && (
+            <p className="text-center text-xs text-text-secondary/60">
+              Using {selectedModel.label}
+              {selectedModel.costPerImage > 0
+                ? ` · Estimated cost: $${(totalRemaining * selectedModel.costPerImage * (processingMode === "batch" ? 0.5 : 1)).toFixed(2)}`
+                : " · Free tier"}
+              {processingMode === "batch" ? " · Batch mode (50% off)" : " · Standard mode"}
+            </p>
+          )}
+        </div>
+
+        <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     );
   }

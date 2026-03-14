@@ -3,7 +3,8 @@ import { getGeminiClient } from "@/lib/gemini";
 
 export async function POST(request: NextRequest) {
   try {
-    const { scenePrompts, apiKey, model, referenceImage } = await request.json();
+    const { scenePrompts, apiKey, model, referenceImage, aspectRatio } = await request.json();
+    const imageAspectRatio = typeof aspectRatio === "string" && aspectRatio ? aspectRatio : "16:9";
 
     if (!Array.isArray(scenePrompts) || scenePrompts.length === 0) {
       return NextResponse.json(
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
           contents: [{ role: "user" as const, parts }],
           config: {
             responseModalities: ["image", "text"],
+            imageConfig: { aspectRatio: imageAspectRatio },
           },
           metadata: { key: sp.key },
         };

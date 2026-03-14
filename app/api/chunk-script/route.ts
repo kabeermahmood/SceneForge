@@ -31,7 +31,8 @@ const HIERARCHICAL_THRESHOLD = 20;
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, chunksCount, apiKey } = await request.json();
+    const { script, chunksCount, apiKey, model } = await request.json();
+    const textModel = typeof model === "string" && model ? model : "gemini-2.5-flash";
 
     if (!script || typeof script !== "string" || script.length < 100) {
       return NextResponse.json(
@@ -70,19 +71,20 @@ export async function POST(request: NextRequest) {
 
     if (chunksCount <= HIERARCHICAL_THRESHOLD) {
       // ── SIMPLE MODE: single-call chunking (≤20 scenes) ──
-      console.log(`[chunk-script] Simple mode — ${chunksCount} scenes`);
-      allScenes = await simpleChunk(script, chunksCount, apiKey);
+      console.log(`[chunk-script] Simple mode — ${chunksCount} scenes, model: ${textModel}`);
+      allScenes = await simpleChunk(script, chunksCount, apiKey, textModel);
     } else {
       // ── HIERARCHICAL MODE: acts → scenes (>20 scenes) ──
       const actCount = Math.min(Math.ceil(chunksCount / 15), 8);
       console.log(
-        `[chunk-script] Hierarchical mode — ${chunksCount} scenes across ${actCount} acts`
+        `[chunk-script] Hierarchical mode — ${chunksCount} scenes across ${actCount} acts, model: ${textModel}`
       );
       allScenes = await hierarchicalChunk(
         script,
         chunksCount,
         actCount,
-        apiKey
+        apiKey,
+        textModel
       );
     }
 
@@ -100,20 +102,21 @@ export async function POST(request: NextRequest) {
 async function simpleChunk(
   script: string,
   chunksCount: number,
-  apiKey: string
+  apiKey: string,
+  textModel: string
 ): Promise<SceneChunk[]> {
   const prompt = buildChunkingPrompt(script, chunksCount);
   let data: ChunkResponse;
 
   try {
-    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
+    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey, textModel);
   } catch {
-    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey);
+    data = await geminiTextToJSON<ChunkResponse>(prompt, apiKey, textModel);
   }
 
   if (data.scenes.length !== chunksCount) {
     const retryPrompt = `${prompt}\n\nIMPORTANT: You returned ${data.scenes.length} chunks but I need exactly ${chunksCount}. Please try again with exactly ${chunksCount} chunks.`;
-    data = await geminiTextToJSON<ChunkResponse>(retryPrompt, apiKey);
+    data = await geminiTextToJSON<ChunkResponse>(retryPrompt, apiKey, textModel);
   }
 
   return data.scenes;
@@ -123,16 +126,17 @@ async function hierarchicalChunk(
   script: string,
   totalScenes: number,
   actCount: number,
-  apiKey: string
+  apiKey: string,
+  textModel: string
 ): Promise<SceneChunk[]> {
   // Phase 1: Split into acts
   const actsPrompt = buildActsPrompt(script, actCount, totalScenes);
   let actsData: ActResponse;
 
   try {
-    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey);
+    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey, textModel);
   } catch {
-    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey);
+    actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey, textModel);
   }
 
   const acts = actsData.acts;
@@ -169,9 +173,9 @@ async function hierarchicalChunk(
 
     let actScenes: ChunkResponse;
     try {
-      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey);
+      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey, textModel);
     } catch {
-      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey);
+      actScenes = await geminiTextToJSON<ChunkResponse>(actPrompt, apiKey, textModel);
     }
 
     // Normalize chunk_index to ensure strict sequential ordering
