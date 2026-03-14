@@ -25,6 +25,9 @@ export interface Scene {
   status: "pending" | "generating" | "completed" | "failed" | "approved";
   generation_prompt: string;
   error_message: string | null;
+  animation_prompt: string | null;
+  camera_movement: string | null;
+  suggested_transition: string | null;
 }
 
 export type ProcessingMode = "batch" | "standard";
@@ -69,6 +72,34 @@ export const IMAGE_MODELS: ImageModelOption[] = [
   },
 ];
 
+export interface TextModelOption {
+  id: string;
+  label: string;
+  description: string;
+  costPer1MTokens: number;
+}
+
+export const TEXT_MODELS: TextModelOption[] = [
+  {
+    id: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash (Free)",
+    description: "Free tier, good for testing",
+    costPer1MTokens: 0,
+  },
+  {
+    id: "gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    description: "Fast and cheap, good quality",
+    costPer1MTokens: 0.15,
+  },
+  {
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    description: "Best quality prompts, higher cost",
+    costPer1MTokens: 1.25,
+  },
+];
+
 export interface ProjectState {
   script: string;
   duration_seconds: number;
@@ -90,6 +121,8 @@ export interface ProjectState {
     | "error";
   current_scene_index: number;
   error_message: string | null;
+  animation_prompts_generated: boolean;
+  animation_prompt_model: string;
 }
 
 export type ArtStyleOption = {

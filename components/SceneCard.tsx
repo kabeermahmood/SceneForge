@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, X, RefreshCw, Pencil, ChevronDown, ChevronUp, Loader2, Download } from "lucide-react";
+import { Check, X, RefreshCw, Pencil, ChevronDown, ChevronUp, Loader2, Download, ClipboardCopy } from "lucide-react";
 import type { Scene } from "@/lib/types";
 
 interface SceneCardProps {
@@ -26,6 +26,25 @@ export default function SceneCard({
   const [showPrompt, setShowPrompt] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(scene.scene_description);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  const copyAnimationPrompt = async () => {
+    if (!scene.animation_prompt) return;
+    try {
+      await navigator.clipboard.writeText(scene.animation_prompt);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = scene.animation_prompt;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2000);
+  };
 
   const downloadImage = () => {
     if (!scene.image_base64 || !scene.image_mime_type) return;
@@ -116,9 +135,31 @@ export default function SceneCard({
           {showPrompt ? "Hide prompt" : "Show prompt"}
         </button>
         {showPrompt && (
-          <p className="mt-2 rounded-lg bg-background/50 p-3 text-[11px] leading-relaxed text-text-secondary/70">
-            {scene.scene_description}
-          </p>
+          <div className="mt-2 space-y-2">
+            <p className="rounded-lg bg-background/50 p-3 text-[11px] leading-relaxed text-text-secondary/70">
+              {scene.scene_description}
+            </p>
+            {scene.animation_prompt && (
+              <div className="rounded-lg border border-accent/20 bg-accent/5 p-3">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent/70">
+                  Animation Prompt
+                </p>
+                <p className="text-[11px] leading-relaxed text-text-primary/80">
+                  {scene.animation_prompt}
+                </p>
+                {scene.camera_movement && (
+                  <p className="mt-1.5 text-[10px] text-text-secondary">
+                    Camera: {scene.camera_movement}
+                  </p>
+                )}
+                {scene.suggested_transition && (
+                  <p className="text-[10px] text-text-secondary">
+                    Transition: {scene.suggested_transition}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Edit form */}
@@ -187,6 +228,19 @@ export default function SceneCard({
                   <Download size={12} />
                   Save
                 </button>
+                {scene.animation_prompt && (
+                  <button
+                    onClick={copyAnimationPrompt}
+                    className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      copiedPrompt
+                        ? "border-success/50 bg-success/10 text-success"
+                        : "border-border text-text-secondary hover:border-accent hover:text-accent"
+                    }`}
+                  >
+                    <ClipboardCopy size={12} />
+                    {copiedPrompt ? "Copied!" : "Copy Prompt"}
+                  </button>
+                )}
                 <button
                   onClick={() => onApproveToggle?.(index)}
                   className={`ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
