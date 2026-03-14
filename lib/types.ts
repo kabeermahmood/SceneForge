@@ -100,34 +100,6 @@ export const TEXT_MODELS: TextModelOption[] = [
   },
 ];
 
-export interface TextModelOption {
-  id: string;
-  label: string;
-  description: string;
-  costPer1MTokens: number;
-}
-
-export const TEXT_MODELS: TextModelOption[] = [
-  {
-    id: "gemini-2.0-flash",
-    label: "Gemini 2.0 Flash",
-    description: "Free tier — fast, good for most scripts",
-    costPer1MTokens: 0,
-  },
-  {
-    id: "gemini-2.5-flash",
-    label: "Gemini 2.5 Flash",
-    description: "Better quality, low cost",
-    costPer1MTokens: 0.15,
-  },
-  {
-    id: "gemini-2.5-pro",
-    label: "Gemini 2.5 Pro",
-    description: "Highest quality, detailed character bibles",
-    costPer1MTokens: 1.25,
-  },
-];
-
 export interface ProjectState {
   script: string;
   duration_seconds: number;

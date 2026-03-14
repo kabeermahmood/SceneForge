@@ -20,7 +20,6 @@ import {
   Wand2,
   BookOpen,
 } from "lucide-react";
-import { IMAGE_MODELS } from "@/lib/types";
 import { useProjectStore } from "@/store/useProjectStore";
 import { ART_STYLES, IMAGE_MODELS } from "@/lib/types";
 import { buildSceneImagePrompt } from "@/lib/prompts";
@@ -330,7 +329,7 @@ function HomeContent() {
       // Remaining scenes (skip index 0 which was the hero frame)
       const remainingPrompts = scenePrompts.slice(1);
 
-      if (currentProcessingMode === "batch" && remainingPrompts.length > 0) {
+      if (processingMode === "batch" && remainingPrompts.length > 0) {
         // ── BATCH MODE (parallel sub-batches, no timeout, user-controlled exit) ──
         setBatchMode(true);
         setBatchState("");
@@ -786,7 +785,7 @@ function HomeContent() {
       const scenePrompts = newScenes.map(
         (scene: { chunk_index: number; scene_description: string; scene_emotion: string; characters_present: string[]; script_text: string }, i: number) => {
           const prompt = buildSceneImagePrompt(
-            { ...scene, image_base64: null, image_mime_type: null, status: "pending" as const, generation_prompt: "", error_message: null },
+            { ...scene, image_base64: null, image_mime_type: null, status: "pending" as const, generation_prompt: "", error_message: null, animation_prompt: null, camera_movement: null, suggested_transition: null },
             newScenes.length,
             newBible,
             artStylePrompt,
@@ -1320,203 +1319,6 @@ function HomeContent() {
             Start Over
           </button>
         </div>
-      </div>
-    );
-  }
-
-  // ====== HERO REVIEW STATE ======
-  if (pipelineStage === "hero_review") {
-    const heroScene = scenes[0];
-    const heroOk = heroScene && (heroScene.status === "completed" || heroScene.status === "approved") && heroScene.image_base64;
-    const heroFailed = heroScene && heroScene.status === "failed";
-    const heroGenerating = heroScene && heroScene.status === "generating";
-    const totalRemaining = Math.max(0, scenes.length - 1);
-    const selectedModel = IMAGE_MODELS.find((m) => m.id === imageModel);
-
-    return (
-      <div className="flex min-h-screen flex-col pb-12">
-        <header className="flex items-center justify-between py-8">
-          <div>
-            <h1 className="font-heading text-2xl font-bold text-accent">
-              SceneForge
-            </h1>
-            <p className="mt-1 text-xs text-text-secondary">
-              Review your hero frame before generating all scenes
-            </p>
-          </div>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="rounded-lg border border-border bg-surface p-3 text-text-secondary transition-colors hover:border-accent hover:text-accent"
-          >
-            <Settings size={20} />
-          </button>
-        </header>
-
-        <div className="mx-auto w-full max-w-3xl space-y-6">
-          {/* Status banner */}
-          <div className="flex items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-5 py-3">
-            <CheckCircle2 size={20} className="shrink-0 text-accent" />
-            <div>
-              <p className="text-sm font-semibold text-text-primary">
-                Character Bible & Script Chunking Complete
-              </p>
-              <p className="text-xs text-text-secondary">
-                {scenes.length} scenes ready — review Scene 1 (hero frame) below before generating the rest
-              </p>
-            </div>
-          </div>
-
-          {/* Hero Frame Preview */}
-          <div className="overflow-hidden rounded-xl border-2 border-accent/40 bg-surface">
-            <div className="border-b border-border bg-accent/5 px-5 py-3">
-              <h2 className="font-heading text-base font-bold text-text-primary">
-                Scene 1 — Hero Reference Frame
-              </h2>
-              <p className="mt-0.5 text-xs text-text-secondary">
-                All remaining scenes will match this art style and visual consistency
-              </p>
-            </div>
-
-            <div className="p-5">
-              {heroOk ? (
-                <img
-                  src={`data:${heroScene.image_mime_type};base64,${heroScene.image_base64}`}
-                  alt="Hero Frame — Scene 1"
-                  className="w-full rounded-lg"
-                />
-              ) : heroGenerating ? (
-                <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-background">
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 size={32} className="animate-spin text-accent" />
-                    <p className="text-xs text-text-secondary">Generating hero frame...</p>
-                  </div>
-                </div>
-              ) : heroFailed ? (
-                <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-error/5">
-                  <div className="text-center">
-                    <AlertTriangle size={32} className="mx-auto text-error/60" />
-                    <p className="mt-2 text-xs text-error">{heroScene.error_message || "Hero frame generation failed"}</p>
-                    <p className="mt-1 text-[11px] text-text-secondary">Try a different art style or model, then regenerate</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-background/50">
-                  <span className="text-sm text-text-secondary/40">No hero frame</span>
-                </div>
-              )}
-
-              {heroScene && (
-                <p className="mt-3 text-xs leading-relaxed text-text-secondary">
-                  {heroScene.script_text}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Scene Description Editor */}
-          <div className="overflow-hidden rounded-xl border border-border bg-surface">
-            <button
-              onClick={() => {
-                if (!heroEditMode && heroScene) {
-                  setHeroEditDescription(heroScene.scene_description);
-                }
-                setHeroEditMode(!heroEditMode);
-              }}
-              className="flex w-full items-center justify-between border-b border-border px-5 py-3 text-left transition-colors hover:bg-accent/5"
-            >
-              <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
-                <Pencil size={14} className="text-accent" />
-                Edit Scene Description
-              </h3>
-              <span className="text-xs text-text-secondary">
-                {heroEditMode ? "Collapse" : "Expand to edit"}
-              </span>
-            </button>
-
-            {heroEditMode && (
-              <div className="space-y-3 p-5">
-                <p className="text-xs text-text-secondary">
-                  Modify the visual description that guides image generation. Changes apply on next regeneration.
-                </p>
-                <textarea
-                  value={heroEditDescription}
-                  onChange={(e) => setHeroEditDescription(e.target.value)}
-                  rows={5}
-                  className="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/40 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-                  placeholder="Describe the visual scene..."
-                />
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-text-secondary/60">
-                    {heroEditDescription.length} characters
-                  </p>
-                  <button
-                    onClick={() => {
-                      if (heroScene) setHeroEditDescription(heroScene.scene_description);
-                    }}
-                    className="text-xs text-accent hover:underline"
-                  >
-                    Reset to original
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Art Style & Model selector */}
-          <div className="space-y-4 rounded-xl border border-border bg-surface p-5">
-            <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
-              <Palette size={16} className="text-accent" />
-              Adjust Before Continuing
-            </h3>
-
-            <StyleSelector />
-
-            <ProcessingConfig />
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <button
-              onClick={() => {
-                const edited = heroEditMode && heroEditDescription.trim().length > 0
-                  && heroEditDescription !== heroScene?.scene_description
-                  ? heroEditDescription.trim()
-                  : undefined;
-                regenerateHero(edited);
-                setHeroEditMode(false);
-              }}
-              disabled={heroGenerating}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-accent/30 bg-surface py-4 text-sm font-bold text-accent transition-all hover:border-accent hover:bg-accent/5 disabled:opacity-40"
-            >
-              <RefreshCw size={18} className={heroGenerating ? "animate-spin" : ""} />
-              {heroGenerating ? "Regenerating..." : heroEditMode && heroEditDescription !== heroScene?.scene_description ? "Regenerate with Edits" : "Regenerate Hero Frame"}
-            </button>
-
-            <button
-              onClick={continueAfterHero}
-              disabled={!heroOk}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent py-4 text-sm font-bold text-background transition-all hover:bg-accent-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Play size={18} />
-              Continue — Generate {totalRemaining} Remaining Scene{totalRemaining !== 1 ? "s" : ""}
-            </button>
-          </div>
-
-          {selectedModel && (
-            <p className="text-center text-xs text-text-secondary/60">
-              Using {selectedModel.label}
-              {selectedModel.costPerImage > 0
-                ? ` · Estimated cost: $${(totalRemaining * selectedModel.costPerImage * (processingMode === "batch" ? 0.5 : 1)).toFixed(2)}`
-                : " · Free tier"}
-              {processingMode === "batch" ? " · Batch mode (50% off)" : " · Standard mode"}
-            </p>
-          )}
-        </div>
-
-        <SettingsPanel
-          isOpen={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-        />
       </div>
     );
   }
