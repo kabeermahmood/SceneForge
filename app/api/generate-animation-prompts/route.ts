@@ -13,7 +13,7 @@ interface AnimationResult {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { script, characterBible, scenes, apiKey, model, secondsPerScene } =
+    const { script, characterBible, scenes, apiKey, model, secondsPerScene, videoTool } =
       body as {
         script: string;
         characterBible: CharacterBible;
@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
         apiKey: string;
         model: string;
         secondsPerScene: number;
+        videoTool?: string;
       };
 
     if (!script || !characterBible || !scenes?.length || !apiKey) {
@@ -38,13 +39,15 @@ export async function POST(request: NextRequest) {
 
     const selectedModel = model || "gemini-2.5-flash";
     const sps = secondsPerScene || 8;
+    const selectedTool = videoTool || "grok";
     const client = getGeminiClient(apiKey);
 
     const prompt = buildAnimationPromptsPrompt(
       script,
       characterBible,
       scenes,
-      sps
+      sps,
+      selectedTool
     );
 
     const result = await client.models.generateContent({

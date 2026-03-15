@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Package, FileJson, BookOpen, Loader2, Film, Download, ChevronDown } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 import { calculateSceneTimestamps } from "@/lib/chunker";
-import { TEXT_MODELS } from "@/lib/types";
+import { TEXT_MODELS, VIDEO_TOOLS } from "@/lib/types";
 
 export default function DownloadPanel() {
   const scenes = useProjectStore((s) => s.scenes);
@@ -18,6 +18,8 @@ export default function DownloadPanel() {
   const animModel = useProjectStore((s) => s.animation_prompt_model);
   const setAnimModel = useProjectStore((s) => s.setAnimationPromptModel);
   const setAnimGenerated = useProjectStore((s) => s.setAnimationPromptsGenerated);
+  const videoTool = useProjectStore((s) => s.video_tool);
+  const setVideoTool = useProjectStore((s) => s.setVideoTool);
   const updateScene = useProjectStore((s) => s.updateScene);
 
   const [zipping, setZipping] = useState(false);
@@ -133,6 +135,7 @@ export default function DownloadPanel() {
           apiKey,
           model: animModel,
           secondsPerScene: clipDuration,
+          videoTool,
         }),
       });
 
@@ -170,32 +173,12 @@ export default function DownloadPanel() {
   };
 
   const downloadAnimationPrompts = () => {
-    const timestamps = calculateSceneTimestamps(scenes.length, duration);
-    const modelLabel = TEXT_MODELS.find((m) => m.id === animModel)?.label || animModel;
-
-    let txt = `SCENEFORGE — ANIMATION PROMPTS\n`;
-    txt += `Generated with: ${modelLabel}\n`;
-    txt += `Total scenes: ${scenes.length} | Duration: ${duration}s | ${clipDuration}s per clip\n`;
-    txt += `========================================\n\n`;
-
-    scenes.forEach((scene, i) => {
-      const ts = timestamps[i];
-      const padded = String(scene.chunk_index).padStart(2, "0");
-      const hasImage = scene.image_base64 && (scene.status === "completed" || scene.status === "approved");
-
-      txt += `SCENE ${scene.chunk_index} | ${ts?.start || "?"} — ${ts?.end || "?"} | scene_${padded}.png\n`;
-      txt += `────────────────────────────────────────\n`;
-      txt += `Script: "${scene.script_text}"\n`;
-      txt += `Emotion: ${scene.scene_emotion}\n`;
-      if (!hasImage) {
-        txt += `⚠ IMAGE NOT GENERATED\n`;
-      }
-      txt += `\nANIMATION PROMPT (paste into video generator\nalong with the scene image):\n\n`;
-      txt += `${scene.animation_prompt || "[No animation prompt generated]"}\n\n`;
-      txt += `Camera: ${scene.camera_movement || "N/A"}\n`;
-      txt += `Transition: ${scene.suggested_transition || "Cut"}\n`;
-      txt += `========================================\n\n`;
+    const parts = scenes.map((scene) => {
+      const prompt = scene.animation_prompt || "[No animation prompt generated]";
+      return `Scene ${scene.chunk_index}\n${prompt}`;
     });
+
+    const txt = parts.join("\n\n\n");
 
     const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -247,7 +230,26 @@ export default function DownloadPanel() {
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2.5">
         <Film size={14} className="shrink-0 text-accent" />
 
-        {/* Model selector */}
+        {/* Video tool selector */}
+        <div className="relative">
+          <select
+            value={videoTool}
+            onChange={(e) => {
+              setVideoTool(e.target.value as "grok" | "kling" | "runway");
+              if (animGenerated) setAnimGenerated(false);
+            }}
+            className="appearance-none rounded-md border border-border bg-surface py-1.5 pl-2.5 pr-7 text-[11px] font-medium text-text-primary transition-colors hover:border-accent focus:border-accent focus:outline-none"
+          >
+            {VIDEO_TOOLS.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary" />
+        </div>
+
+        {/* Text model selector */}
         <div className="relative">
           <select
             value={animModel}

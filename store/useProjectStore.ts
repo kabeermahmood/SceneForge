@@ -4,6 +4,7 @@ import type {
   ProcessingMode,
   ProjectState,
   Scene,
+  VideoTool,
 } from "@/lib/types";
 
 interface ProjectActions {
@@ -16,6 +17,7 @@ interface ProjectActions {
   setProcessingMode: (mode: ProcessingMode) => void;
   setImageModel: (model: string) => void;
   setTextModel: (model: string) => void;
+  setVideoTool: (tool: VideoTool) => void;
   setCharacterBible: (bible: CharacterBible) => void;
   setScenes: (scenes: Scene[]) => void;
   updateScene: (index: number, updates: Partial<Scene>) => void;
@@ -37,6 +39,7 @@ const initialState: ProjectState = {
   processing_mode: "batch",
   image_model: "gemini-2.5-flash-image",
   text_model: "gemini-2.5-flash",
+  video_tool: "grok",
   character_bible: null,
   scenes: [],
   pipeline_stage: "idle",
@@ -59,6 +62,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setProcessingMode: (mode) => set({ processing_mode: mode }),
     setImageModel: (model) => set({ image_model: model }),
     setTextModel: (model) => set({ text_model: model }),
+    setVideoTool: (tool) => set({ video_tool: tool }),
     setCharacterBible: (bible) => set({ character_bible: bible }),
     setScenes: (scenes) => set({ scenes }),
     updateScene: (index, updates) =>

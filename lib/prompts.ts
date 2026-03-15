@@ -291,53 +291,86 @@ export function buildAnimationPromptsPrompt(
   script: string,
   bible: CharacterBible,
   scenes: { chunk_index: number; script_text: string; scene_description: string; scene_emotion: string; characters_present: string[] }[],
-  secondsPerScene: number
+  secondsPerScene: number,
+  videoTool: string = "grok"
 ): string {
   const sceneList = scenes.map((s) => {
-    const scriptExcerpt = s.script_text.length > 200 ? s.script_text.slice(0, 200) + "..." : s.script_text;
+    const scriptExcerpt = s.script_text.length > 250 ? s.script_text.slice(0, 250) + "..." : s.script_text;
     return `Scene ${s.chunk_index}:
   Script: "${scriptExcerpt}"
-  Description: ${s.scene_description}
+  Visual: ${s.scene_description}
   Emotion: ${s.scene_emotion}
   Characters: ${s.characters_present.join(", ") || "none"}`;
   }).join("\n\n");
 
-  return `You are an expert animation director writing video-generation prompts. The user has a still image for each scene from an animated video. They will paste your prompt into an AI video generator (Grok, Kling, or Runway) alongside each scene image to convert it into an ${secondsPerScene}-second animated video clip.
+  const toolName = videoTool === "kling" ? "Kling AI" : videoTool === "runway" ? "Runway" : "Grok (xAI)";
+  const fps = secondsPerScene <= 6 ? "24fps" : "30fps";
 
-=== CHARACTER BIBLE ===
-${bible.characters.map((c) => `- ${c.name} (${c.type}): ${c.appearance}. Pose: ${c.default_pose}`).join("\n")}
+  return `You are a professional cinematographer and animation director. You write image-to-video prompts for ${toolName}. The user will upload a still 2D animated scene image and paste your prompt to generate a ${secondsPerScene}-second video clip.
+
+CRITICAL: ${toolName} processes the FIRST 20-30 words most heavily. Front-load the most important motion and subject action. Never waste the opening on boilerplate.
+
+=== CHARACTER REFERENCE ===
+${bible.characters.map((c) => `- ${c.name}: ${c.appearance.slice(0, 120)}`).join("\n")}
 Setting: ${bible.primary_setting}
-Mood: ${bible.overall_mood}
 
-=== FULL SCRIPT (for narrative context) ===
-${script.length > 3000 ? script.slice(0, 3000) + "\n...[truncated]" : script}
+=== SCRIPT CONTEXT ===
+${script.length > 2500 ? script.slice(0, 2500) + "\n...[truncated]" : script}
 
 === SCENES ===
 ${sceneList}
 
-=== YOUR TASK ===
-For each scene, write a concise animation prompt (MAX 80 words) that describes ONLY motion and timing for an ${secondsPerScene}-second video clip. The still image already shows all visual details — do NOT describe appearance, colors, or art style.
+=== PROMPT STRUCTURE (MANDATORY) ===
+Every animation_prompt MUST follow this exact layered structure in order:
 
-EVERY prompt MUST start with:
-"Using the provided image as the exact reference frame — maintain identical character designs, colors, art style, and proportions throughout the ${secondsPerScene}-second clip."
+LAYER 1 — SUBJECT ACTION (first 5-10 words, most critical):
+Start with the primary character action using precise, specific verbs.
+GOOD: "Golden retriever puppy tilts head right, ears perking up"
+BAD: "The dog moves" / "Character animates" / "Scene comes alive"
+Use verbs like: tilts, turns, reaches, leans, steps, lifts, lowers, glances, blinks, nods, wags, twitches, shifts, exhales, shrugs, gestures, recoils, embraces.
 
-Then describe:
-1. CHARACTER ACTIONS — real movement: walking, running, turning heads, gesturing, jumping, reaching, blinking, tail wagging, etc. Make the characters feel alive.
-2. CAMERA MOVEMENT — zoom, pan, dolly, tilt, tracking shot, static, etc.
-3. BACKGROUND/ENVIRONMENT MOTION — wind, water, light shifts, particles, swaying trees, flickering, floating objects, etc.
-4. PACING — must match the scene emotion:
-   - High-energy scenes (action, excitement, conflict): fast camera moves, dynamic character actions, quick environment changes
-   - Calm scenes (reflection, sadness, wonder): slower drifts, subtle animations, ambient motion
-   - Surprise/revelation: start slow then accelerate, or a sudden movement
+LAYER 2 — CAMERA (filmmaking vocabulary):
+Use professional terms: slow dolly-in, gentle pan left, static wide shot, tracking shot, push-in, pull-back, tilt up, handheld drift, over-the-shoulder, rack focus.
+Include: "${fps}, shallow depth of field" for dramatic scenes OR "${fps}, deep focus" for wide establishing shots.
+
+LAYER 3 — PHYSICS & ENVIRONMENT (what else moves):
+Describe secondary motion driven by physics — not random motion:
+- Hair/fur sways gently with head movement
+- Fabric settles after character turns
+- Dust motes drift through light beam
+- Leaves rustle from wind, water ripples, candle flickers
+- Shadows shift as light source changes
+- Steam rises, breath visible in cold air
+Every moving element must have a CAUSE (wind, gravity, character action).
+
+LAYER 4 — CONSISTENCY SUFFIX (always end with this):
+End every prompt with: "Maintain character consistency, stable proportions, do not morph. 2D animated style, consistent line weight and color palette throughout the ${secondsPerScene}-second clip."
+
+=== PACING RULES (match to scene emotion) ===
+- JOY / EXCITEMENT: Quick character actions, energetic camera (tracking, push-in), lively environment. Multiple small movements.
+- SADNESS / REFLECTION: Slow, deliberate single action. Static or very slow dolly. Minimal environment motion. Let stillness breathe.
+- TENSION / SUSPENSE: Slow creeping camera (dolly-in or tilt), character frozen then sudden micro-movement (eye shift, hand clench). Background darkens slightly.
+- WONDER / CURIOSITY: Character looks around slowly, wide-eyed. Gentle pan or tilt to reveal. Floating particles, soft light shifts.
+- ANGER / CONFLICT: Sharp character gestures, fast camera push-in, environment reacts (objects rattle, shadows deepen).
+- WARMTH / LOVE: Slow approach or lean-in, soft-focus background, gentle ambient glow shift. Tender small gesture (hand touch, smile forming).
+- SURPRISE: Start static for 1-2 seconds, then sudden quick action. Camera holds then rapid push-in or pull-back.
+
+=== ANTI-ARTIFACT RULES ===
+- NEVER describe character appearance, colors, or art style in the prompt (the image provides this)
+- NEVER use negative phrasing ("no blur", "don't change"). Use positive: "sharp focus", "stable proportions"
+- NEVER request more than 2-3 distinct character actions per ${secondsPerScene}-second clip (causes jitter)
+- NEVER leave motion unanchored — every movement must have a physical cause
+- Keep total motion restrained and intentional — less is more for quality
+- Characters should stay inside the camera frame throughout the clip
 
 === OUTPUT FORMAT ===
 Return a JSON array. Each element:
 {
   "chunk_index": <number>,
-  "animation_prompt": "<string, max 80 words, starts with reference frame instruction>",
-  "camera_movement": "<string, e.g. 'Slow dolly-in with slight tilt up'>",
-  "suggested_transition": "<string, e.g. 'Crossfade', 'Hard cut', 'Match cut', 'Fade to black'>"
+  "animation_prompt": "<string, 60-120 words, structured as Layer 1-4 above>",
+  "camera_movement": "<string, professional camera direction, e.g. 'Slow dolly-in, 35mm lens, ${fps}, shallow depth of field'>",
+  "suggested_transition": "<string, e.g. 'Crossfade 0.5s', 'Hard cut', 'Match cut on motion', 'Fade to black 1s', 'Whip pan transition'>"
 }
 
-Return ONLY the JSON array, no markdown, no extra text.`;
+Return ONLY the raw JSON array. No markdown. No backticks. No explanation.`;
 }

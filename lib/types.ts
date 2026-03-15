@@ -100,6 +100,20 @@ export const TEXT_MODELS: TextModelOption[] = [
   },
 ];
 
+export type VideoTool = "grok" | "kling" | "runway";
+
+export interface VideoToolOption {
+  id: VideoTool;
+  label: string;
+  description: string;
+}
+
+export const VIDEO_TOOLS: VideoToolOption[] = [
+  { id: "grok", label: "Grok (xAI)", description: "Best for 2D animated scenes, strong consistency" },
+  { id: "kling", label: "Kling AI", description: "Smooth motion, good for cinematic clips" },
+  { id: "runway", label: "Runway Gen-3", description: "Versatile, good lighting and physics" },
+];
+
 export interface ProjectState {
   script: string;
   duration_seconds: number;
@@ -110,6 +124,7 @@ export interface ProjectState {
   processing_mode: ProcessingMode;
   image_model: string;
   text_model: string;
+  video_tool: VideoTool;
   character_bible: CharacterBible | null;
   scenes: Scene[];
   pipeline_stage:
