@@ -21,6 +21,7 @@ interface ProjectActions {
   setVideoTool: (tool: VideoTool) => void;
   setCharacterBible: (bible: CharacterBible) => void;
   setScenes: (scenes: Scene[]) => void;
+  appendScenes: (newScenes: Scene[]) => void;
   updateScene: (index: number, updates: Partial<Scene>) => void;
   setPipelineStage: (stage: ProjectState["pipeline_stage"]) => void;
   setCurrentSceneIndex: (index: number) => void;
@@ -68,6 +69,15 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setVideoTool: (tool) => set({ video_tool: tool }),
     setCharacterBible: (bible) => set({ character_bible: bible }),
     setScenes: (scenes) => set({ scenes }),
+    appendScenes: (newScenes) =>
+      set((state) => {
+        const offset = state.scenes.length;
+        const offsetScenes = newScenes.map((s, i) => ({
+          ...s,
+          chunk_index: offset + i + 1,
+        }));
+        return { scenes: [...state.scenes, ...offsetScenes] };
+      }),
     updateScene: (index, updates) =>
       set((state) => ({
         scenes: state.scenes.map((s, i) =>

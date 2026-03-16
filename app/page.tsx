@@ -19,6 +19,8 @@ import {
   Pencil,
   Wand2,
   BookOpen,
+  FilePlus2,
+  X,
 } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 import { ART_STYLES, IMAGE_MODELS } from "@/lib/types";
@@ -54,6 +56,10 @@ function HomeContent() {
   const [heroRegeneratingPrompt, setHeroRegeneratingPrompt] = useState(false);
   const [heroUserGuidance, setHeroUserGuidance] = useState("");
   const [regeneratingBible, setRegeneratingBible] = useState(false);
+  const [showContinuation, setShowContinuation] = useState(false);
+  const [continuationScript, setContinuationScript] = useState("");
+  const [continuationSceneCount, setContinuationSceneCount] = useState(20);
+  const [continuationRunning, setContinuationRunning] = useState(false);
   const cancelledRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const switchToStandardRef = useRef(false);
@@ -86,6 +92,7 @@ function HomeContent() {
   const textModel = useProjectStore((s) => s.text_model);
   const standardConcurrency = useProjectStore((s) => s.standard_concurrency);
   const setScenes = useProjectStore((s) => s.setScenes);
+  const appendScenes = useProjectStore((s) => s.appendScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
   const setCurrentSceneIndex = useProjectStore((s) => s.setCurrentSceneIndex);
 
@@ -989,6 +996,184 @@ function HomeContent() {
     }
   }, [handleRegenerate]);
 
+  // ====== Continue with additional script (split-run) ======
+  const runContinuation = useCallback(async () => {
+    const apiKey = getApiKey();
+    const state = useProjectStore.getState();
+    const bible = state.character_bible;
+    if (!apiKey || !bible || continuationScript.length < 50) return;
+
+    setContinuationRunning(true);
+    cancelledRef.current = false;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
+    sceneTimesRef.current = [];
+    setEta(null);
+
+    const existingCount = state.scenes.length;
+    const heroScene = state.scenes[0];
+    const heroImage = heroScene?.image_base64
+      ? { data: heroScene.image_base64, mimeType: heroScene.image_mime_type || "image/png" }
+      : null;
+
+    try {
+      setPipelineStage("chunking");
+      setErrorMessage(null);
+
+      const chunkRes = await fetch("/api/chunk-script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: continuationScript,
+          chunksCount: continuationSceneCount,
+          apiKey,
+          model: state.text_model,
+          characterBible: bible,
+        }),
+        signal,
+      });
+
+      if (!chunkRes.ok) {
+        const err = await chunkRes.json();
+        throw new Error(err.message || "Failed to chunk continuation script");
+      }
+
+      const chunkData = await chunkRes.json();
+      const rawScenes = chunkData.scenes.map(
+        (s: {
+          chunk_index: number;
+          script_text: string;
+          scene_description: string;
+          scene_emotion: string;
+          characters_present: string[];
+        }) => ({
+          chunk_index: s.chunk_index,
+          script_text: s.script_text,
+          scene_description: s.scene_description,
+          scene_emotion: s.scene_emotion,
+          characters_present: s.characters_present,
+          image_base64: null,
+          image_mime_type: null,
+          status: "pending" as const,
+          generation_prompt: "",
+          error_message: null,
+          animation_prompt: null,
+          camera_movement: null,
+          suggested_transition: null,
+        })
+      );
+
+      appendScenes(rawScenes);
+
+      if (cancelledRef.current) { setPipelineStage("complete"); setContinuationRunning(false); return; }
+
+      setPipelineStage("generating_images");
+      const artStylePrompt = getArtStylePrompt();
+      const currentModel = state.image_model;
+      const allScenes = useProjectStore.getState().scenes;
+      const newCount = rawScenes.length;
+
+      const scenePrompts: { idx: number; prompt: string }[] = [];
+      for (let i = 0; i < newCount; i++) {
+        const globalIdx = existingCount + i;
+        const scene = allScenes[globalIdx];
+        const prompt = buildSceneImagePrompt(
+          scene,
+          allScenes.length,
+          bible,
+          artStylePrompt,
+          state.aspect_ratio
+        );
+        updateScene(globalIdx, { generation_prompt: prompt, status: "generating" });
+        scenePrompts.push({ idx: globalIdx, prompt });
+      }
+
+      const CONCURRENCY = state.standard_concurrency;
+      console.log(`[SceneForge] Continuation — ${newCount} new scenes, concurrency: ${CONCURRENCY}, ref: ${heroImage ? "yes" : "no"}`);
+
+      const generateOne = async (item: { idx: number; prompt: string }) => {
+        setCurrentSceneIndex(item.idx);
+        const startTime = Date.now();
+        try {
+          const reqBody: Record<string, unknown> = {
+            prompt: item.prompt,
+            apiKey,
+            model: currentModel,
+            aspectRatio: state.aspect_ratio,
+          };
+          if (heroImage) reqBody.referenceImage = heroImage;
+
+          const imgRes = await fetch("/api/generate-scene", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(reqBody),
+            signal,
+          });
+
+          if (imgRes.ok) {
+            const imgData = await imgRes.json();
+            updateScene(item.idx, {
+              image_base64: imgData.image_base64,
+              image_mime_type: imgData.mime_type,
+              status: "completed",
+            });
+          } else {
+            const err = await imgRes.json();
+            updateScene(item.idx, { status: "failed", error_message: err.message || "Generation failed" });
+          }
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          updateScene(item.idx, {
+            status: "failed",
+            error_message: err instanceof Error ? err.message : "Generation failed",
+          });
+        }
+        const elapsed = (Date.now() - startTime) / 1000;
+        sceneTimesRef.current.push(elapsed);
+      };
+
+      for (let i = 0; i < scenePrompts.length; i += CONCURRENCY) {
+        if (cancelledRef.current) break;
+        const chunk = scenePrompts.slice(i, i + CONCURRENCY);
+        await Promise.all(chunk.map((item) => generateOne(item)));
+
+        if (sceneTimesRef.current.length > 0) {
+          const avg = sceneTimesRef.current.reduce((a, b) => a + b, 0) / sceneTimesRef.current.length;
+          const completedSoFar = i + chunk.length;
+          const remaining = ((scenePrompts.length - completedSoFar) / CONCURRENCY) * avg;
+          setEta(remaining > 60
+            ? `~${Math.ceil(remaining / 60)} min remaining`
+            : `~${Math.ceil(remaining)}s remaining`
+          );
+        }
+      }
+
+      setEta(null);
+      setShowContinuation(false);
+      setContinuationScript("");
+      setPipelineStage("complete");
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setPipelineStage("complete");
+      } else {
+        const hasAny = useProjectStore.getState().scenes.some(
+          (s) => s.status === "completed" || s.status === "approved"
+        );
+        if (hasAny) {
+          setPipelineStage("complete");
+        } else {
+          setPipelineStage("error");
+          setErrorMessage(err instanceof Error ? err.message : "Continuation failed");
+        }
+      }
+    }
+
+    setContinuationRunning(false);
+    setEta(null);
+  }, [continuationScript, continuationSceneCount, appendScenes, updateScene, setCurrentSceneIndex, setPipelineStage, setErrorMessage, getArtStylePrompt]);
+
   const handleNewProject = () => {
     setShowNewProjectConfirm(true);
   };
@@ -1411,6 +1596,14 @@ function HomeContent() {
             </div>
 
             <button
+              onClick={() => setShowContinuation(!showContinuation)}
+              className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+            >
+              <FilePlus2 size={14} />
+              Continue Script
+            </button>
+
+            <button
               onClick={handleNewProject}
               className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-medium text-text-primary transition-colors hover:border-accent"
             >
@@ -1418,6 +1611,73 @@ function HomeContent() {
             </button>
           </div>
         </header>
+
+        {/* Continuation Script Input */}
+        {showContinuation && (
+          <div className="mt-4 overflow-hidden rounded-xl border-2 border-accent/30 bg-surface">
+            <div className="flex items-center justify-between border-b border-border bg-accent/5 px-5 py-3">
+              <h3 className="flex items-center gap-2 font-heading text-sm font-bold text-text-primary">
+                <FilePlus2 size={16} className="text-accent" />
+                Continue Script — Part {Math.ceil(scenes.length / 20) + 1}
+              </h3>
+              <button
+                onClick={() => setShowContinuation(false)}
+                className="rounded-md p-1 text-text-secondary transition-colors hover:text-text-primary"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <p className="text-xs text-text-secondary">
+                Paste the next part of your script below. The existing Character Bible and hero reference image will be reused for visual consistency.
+              </p>
+              <textarea
+                value={continuationScript}
+                onChange={(e) => setContinuationScript(e.target.value)}
+                rows={8}
+                placeholder="Paste the next part of your script here..."
+                className="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/40 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+              />
+              <div className="flex items-end gap-4">
+                <div className="flex-1">
+                  <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                    Number of scenes for this part
+                  </label>
+                  <input
+                    type="number"
+                    min={4}
+                    max={80}
+                    value={continuationSceneCount}
+                    onChange={(e) => setContinuationSceneCount(Math.max(4, Math.min(80, Number(e.target.value))))}
+                    className="w-32 rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  />
+                </div>
+                <button
+                  onClick={runContinuation}
+                  disabled={continuationScript.length < 50 || continuationRunning}
+                  className="flex items-center gap-2 rounded-xl bg-accent px-6 py-2.5 text-sm font-bold text-background transition-all hover:bg-accent-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {continuationRunning ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={16} />
+                      Generate {continuationSceneCount} Scenes
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="flex items-center gap-4 rounded-lg bg-accent/5 px-4 py-2.5 text-[11px] text-text-secondary">
+                <span>Existing scenes: <strong className="text-text-primary">{scenes.length}</strong></span>
+                <span>New scenes: <strong className="text-text-primary">{continuationSceneCount}</strong></span>
+                <span>Total after: <strong className="text-accent">{scenes.length + continuationSceneCount}</strong></span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Main layout with sidebar */}
         <div className="mt-6 flex gap-6">
