@@ -5,6 +5,7 @@ export interface Character {
   appearance: string;
   personality_visual_cues: string;
   default_pose: string;
+  visual_fingerprint: string;
 }
 
 export interface CharacterBible {
@@ -122,6 +123,7 @@ export interface ProjectState {
   aspect_ratio: "16:9" | "9:16" | "1:1";
   seconds_per_scene: number;
   processing_mode: ProcessingMode;
+  standard_concurrency: 1 | 3;
   image_model: string;
   text_model: string;
   video_tool: VideoTool;

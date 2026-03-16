@@ -55,6 +55,7 @@ function HomeContent() {
   const [heroUserGuidance, setHeroUserGuidance] = useState("");
   const [regeneratingBible, setRegeneratingBible] = useState(false);
   const cancelledRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const switchToStandardRef = useRef(false);
   const sceneTimesRef = useRef<number[]>([]);
   const heroContextRef = useRef<{
@@ -83,6 +84,7 @@ function HomeContent() {
   const processingMode = useProjectStore((s) => s.processing_mode);
   const imageModel = useProjectStore((s) => s.image_model);
   const textModel = useProjectStore((s) => s.text_model);
+  const standardConcurrency = useProjectStore((s) => s.standard_concurrency);
   const setScenes = useProjectStore((s) => s.setScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
   const setCurrentSceneIndex = useProjectStore((s) => s.setCurrentSceneIndex);
@@ -133,6 +135,7 @@ function HomeContent() {
           pipelineStage === "chunking")
       ) {
         cancelledRef.current = true;
+        abortControllerRef.current?.abort();
       }
     };
     window.addEventListener("keydown", handler);
@@ -144,6 +147,10 @@ function HomeContent() {
     const apiKey = getApiKey();
     if (!apiKey) return;
     cancelledRef.current = false;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
     sceneTimesRef.current = [];
     setEta(null);
 
@@ -155,6 +162,7 @@ function HomeContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ script, apiKey, model: textModel }),
+        signal,
       });
       if (!bibleRes.ok) {
         const err = await bibleRes.json();
@@ -177,7 +185,8 @@ function HomeContent() {
       const chunkRes = await fetch("/api/chunk-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script, chunksCount, apiKey, model: textModel }),
+        body: JSON.stringify({ script, chunksCount, apiKey, model: textModel, characterBible: bible }),
+        signal,
       });
       if (!chunkRes.ok) {
         const err = await chunkRes.json();
@@ -253,6 +262,7 @@ function HomeContent() {
             model: currentModel,
             aspectRatio,
           }),
+          signal,
         });
 
         if (heroRes.ok) {
@@ -287,6 +297,10 @@ function HomeContent() {
       return;
 
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setPipelineStage("complete");
+        return;
+      }
       const hasAnyScenes = useProjectStore.getState().scenes.some(
         (s) => s.status === "completed" || s.status === "approved"
       );
@@ -323,10 +337,13 @@ function HomeContent() {
     if (!ctx) return;
 
     const { scenePrompts, heroImage, currentModel, apiKey } = ctx;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
     setPipelineStage("generating_images");
 
     try {
-      // Remaining scenes (skip index 0 which was the hero frame)
       const remainingPrompts = scenePrompts.slice(1);
 
       if (processingMode === "batch" && remainingPrompts.length > 0) {
@@ -368,6 +385,7 @@ function HomeContent() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(batchBody),
+                signal,
               });
 
               if (batchRes.ok) {
@@ -413,6 +431,7 @@ function HomeContent() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ jobName: job.jobName, apiKey }),
+                signal,
               });
 
               const statusData = await statusRes.json();
@@ -470,9 +489,9 @@ function HomeContent() {
             const reason = switchToStandardRef.current ? "user switched to standard" : "batch failures";
             console.log(`[SceneForge] Standard fallback — ${pendingScenes.length} scenes (${reason})`);
             setBatchMode(false);
-            setEta(`Generating ${pendingScenes.length} remaining scene${pendingScenes.length > 1 ? "s" : ""} via standard API (3 parallel)...`);
+            setEta(`Generating ${pendingScenes.length} remaining scene${pendingScenes.length > 1 ? "s" : ""} via standard API...`);
 
-            const FALLBACK_CONCURRENCY = 3;
+            const FALLBACK_CONCURRENCY = standardConcurrency;
 
             const generateFallback = async (item: { sceneIdx: number; prompt: string }) => {
               setCurrentSceneIndex(item.sceneIdx);
@@ -491,6 +510,7 @@ function HomeContent() {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(reqBody),
+                  signal,
                 });
 
                 if (imgRes.ok) {
@@ -522,9 +542,9 @@ function HomeContent() {
 
         setBatchMode(false);
       } else {
-        // ── STANDARD (PARALLEL) MODE — 3 concurrent requests ──
+        // ── STANDARD MODE ──
         setBatchMode(false);
-        const CONCURRENCY = 3;
+        const CONCURRENCY = standardConcurrency;
         console.log(`[SceneForge] Standard mode — model: ${currentModel}, remaining: ${remainingPrompts.length}, concurrency: ${CONCURRENCY}, ref: ${heroImage ? "yes" : "no"}`);
 
         const generateOne = async (localIdx: number) => {
@@ -545,6 +565,7 @@ function HomeContent() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(reqBody),
+              signal,
             });
 
             if (!imgRes.ok) {
@@ -562,6 +583,7 @@ function HomeContent() {
               });
             }
           } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
             updateScene(sceneIdx, {
               status: "failed",
               error_message: err instanceof Error ? err.message : "Image generation failed",
@@ -598,6 +620,12 @@ function HomeContent() {
       setBatchMode(false);
       setPipelineStage("complete");
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setEta(null);
+        setBatchMode(false);
+        setPipelineStage("complete");
+        return;
+      }
       const hasAnyCompleted = useProjectStore.getState().scenes.some(
         (s) => s.status === "completed" || s.status === "approved"
       );
@@ -755,7 +783,7 @@ function HomeContent() {
       const chunkRes = await fetch("/api/chunk-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script: state.script, chunksCount, apiKey, model: state.text_model }),
+        body: JSON.stringify({ script: state.script, chunksCount, apiKey, model: state.text_model, characterBible: newBible }),
       });
       if (!chunkRes.ok) {
         const err = await chunkRes.json();
@@ -941,6 +969,25 @@ function HomeContent() {
     (index: number) => handleRegenerate(index),
     [handleRegenerate]
   );
+
+  const retryAllFailed = useCallback(async () => {
+    const apiKey = getApiKey();
+    const state = useProjectStore.getState();
+    if (!apiKey) return;
+
+    const failedIndices = state.scenes
+      .map((s, i) => (s.status === "failed" ? i : -1))
+      .filter((i) => i >= 0);
+
+    if (failedIndices.length === 0) return;
+
+    const RETRY_CONCURRENCY = standardConcurrency;
+
+    for (let i = 0; i < failedIndices.length; i += RETRY_CONCURRENCY) {
+      const batch = failedIndices.slice(i, i + RETRY_CONCURRENCY);
+      await Promise.all(batch.map((idx) => handleRegenerate(idx)));
+    }
+  }, [handleRegenerate]);
 
   const handleNewProject = () => {
     setShowNewProjectConfirm(true);
@@ -1400,6 +1447,7 @@ function HomeContent() {
                 onEditRegenerate={handleEditRegenerate}
                 onApproveToggle={handleApproveToggle}
                 onRetry={handleRetry}
+                onRetryAllFailed={retryAllFailed}
               />
             ) : (
               <StoryboardGrid />

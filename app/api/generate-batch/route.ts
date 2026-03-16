@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGeminiClient } from "@/lib/gemini";
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const { scenePrompts, apiKey, model, referenceImage, aspectRatio } = await request.json();

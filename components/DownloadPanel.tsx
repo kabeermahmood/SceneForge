@@ -23,6 +23,8 @@ export default function DownloadPanel() {
   const updateScene = useProjectStore((s) => s.updateScene);
 
   const [zipping, setZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState("");
+  const [zipError, setZipError] = useState<string | null>(null);
   const [generatingAnim, setGeneratingAnim] = useState(false);
   const [animError, setAnimError] = useState<string | null>(null);
   const [clipDuration, setClipDuration] = useState(8);
@@ -34,31 +36,39 @@ export default function DownloadPanel() {
   const downloadZip = async () => {
     if (completedScenes.length === 0) return;
     setZipping(true);
+    setZipError(null);
+    setZipProgress(`Packing 0/${completedScenes.length} images...`);
 
     try {
       const JSZip = (await import("jszip")).default;
       const { saveAs } = await import("file-saver");
       const zip = new JSZip();
 
-      completedScenes.forEach((scene) => {
-        if (!scene.image_base64) return;
+      for (let i = 0; i < completedScenes.length; i++) {
+        const scene = completedScenes[i];
+        if (!scene.image_base64) continue;
+        setZipProgress(`Packing ${i + 1}/${completedScenes.length} images...`);
         const padded = String(scene.chunk_index).padStart(2, "0");
         const byteChars = atob(scene.image_base64);
         const byteArray = new Uint8Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-          byteArray[i] = byteChars.charCodeAt(i);
+        for (let j = 0; j < byteChars.length; j++) {
+          byteArray[j] = byteChars.charCodeAt(j);
         }
-        const ext =
-          scene.image_mime_type === "image/jpeg" ? "jpg" : "png";
+        const ext = scene.image_mime_type === "image/jpeg" ? "jpg" : "png";
         zip.file(`scene_${padded}.${ext}`, byteArray);
-      });
+        // Yield to the main thread every 5 images
+        if (i % 5 === 4) await new Promise((r) => setTimeout(r, 0));
+      }
 
+      setZipProgress("Compressing...");
       const blob = await zip.generateAsync({ type: "blob" });
       saveAs(blob, "sceneforge_images.zip");
     } catch (err) {
       console.error("ZIP generation failed:", err);
+      setZipError(err instanceof Error ? err.message : "ZIP generation failed");
     } finally {
       setZipping(false);
+      setZipProgress("");
     }
   };
 
@@ -205,8 +215,12 @@ export default function DownloadPanel() {
           ) : (
             <Package size={14} />
           )}
-          Download {completedScenes.length}/{scenes.length} Images (ZIP)
+          {zipping && zipProgress ? zipProgress : `Download ${completedScenes.length}/${scenes.length} Images (ZIP)`}
         </button>
+
+        {zipError && (
+          <span className="text-[10px] text-error">{zipError}</span>
+        )}
 
         <button
           onClick={downloadSceneMap}

@@ -40,6 +40,8 @@ const BATCH_DISCOUNT = 0.5;
 export default function ProcessingConfig() {
   const processingMode = useProjectStore((s) => s.processing_mode);
   const setProcessingMode = useProjectStore((s) => s.setProcessingMode);
+  const standardConcurrency = useProjectStore((s) => s.standard_concurrency);
+  const setStandardConcurrency = useProjectStore((s) => s.setStandardConcurrency);
   const imageModel = useProjectStore((s) => s.image_model);
   const setImageModel = useProjectStore((s) => s.setImageModel);
   const textModel = useProjectStore((s) => s.text_model);
@@ -103,6 +105,58 @@ export default function ProcessingConfig() {
           ))}
         </div>
       </div>
+
+      {/* Standard Mode Concurrency */}
+      {processingMode === "standard" && (
+        <div>
+          <label className="mb-3 block font-heading text-sm font-medium text-text-secondary">
+            Generation Speed
+          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => setStandardConcurrency(1)}
+              className={`flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
+                standardConcurrency === 1
+                  ? "border-accent bg-accent/10"
+                  : "border-border bg-surface hover:border-text-secondary/30"
+              }`}
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-text-primary">
+                    Sequential
+                  </span>
+                  <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
+                    Recommended
+                  </span>
+                </div>
+                <span className="mt-0.5 block text-xs leading-relaxed text-text-secondary">
+                  One image at a time — best consistency &amp; quality
+                </span>
+              </div>
+            </button>
+            <button
+              onClick={() => setStandardConcurrency(3)}
+              className={`flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
+                standardConcurrency === 3
+                  ? "border-accent bg-accent/10"
+                  : "border-border bg-surface hover:border-text-secondary/30"
+              }`}
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-text-primary">
+                    Parallel (3x)
+                  </span>
+                </div>
+                <span className="mt-0.5 block text-xs leading-relaxed text-text-secondary">
+                  3 images at once — faster but may reduce consistency
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Image Model Selector */}
       <div>

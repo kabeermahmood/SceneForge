@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGeminiClient } from "@/lib/gemini";
 
+export const maxDuration = 120;
+
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }

@@ -1,4 +1,4 @@
-import type { Character, CharacterBible, Scene, TextModelOption } from "./types";
+import type { Character, CharacterBible, Scene } from "./types";
 
 export function buildCharacterBiblePrompt(script: string): string {
   return `You are an expert animation character designer and story analyst.
@@ -12,6 +12,7 @@ For each character, generate a detailed Character Bible entry with:
 - appearance: Extremely detailed physical description (fur color, eye color, hair style, clothing, body type, distinguishing features, accessories). Be VERY specific — this description will be used to regenerate this exact character across 15+ images and it must be precise enough to maintain visual consistency. Include: exact colors (e.g., "warm chestnut brown fur" not just "brown"), specific clothing items with colors, body proportions, and any unique identifying features. Use 50-100 words.
 - personality_visual_cues: How their personality shows visually (e.g., "always has a slight head tilt showing curiosity", "ears slightly back showing nervousness")
 - default_pose: Their most common pose or position in the video
+- visual_fingerprint: The 3-5 most distinctive, non-negotiable visual features that make this character instantly recognizable across all frames. These must be concrete, color-specific attributes (e.g., "warm chestnut brown fur, bright amber eyes, small red collar with gold tag, slightly oversized floppy ears"). These will be enforced in EVERY generated image. Be extremely specific with colors and features.
 
 Also determine:
 - primary_setting: The main location/environment of the video. Be very specific with colors and objects (e.g., "a cozy modern apartment with cream-colored walls, a warm brown leather couch, a small potted monstera plant in a terracotta pot, light oak hardwood floors, a large window with sheer white curtains letting in soft natural light"). 30-50 words.
@@ -27,7 +28,8 @@ Return your response as a valid JSON object with this EXACT structure:
       "species": "string or null",
       "appearance": "string (50-100 words, extremely detailed)",
       "personality_visual_cues": "string",
-      "default_pose": "string"
+      "default_pose": "string",
+      "visual_fingerprint": "string (3-5 key features, comma-separated)"
     }
   ],
   "primary_setting": "string (30-50 words, very specific)",
@@ -47,36 +49,29 @@ export function buildChunkingPrompt(
   script: string,
   chunksCount: number
 ): string {
-  return `You are a video scene planner for animated YouTube videos.
+  return `You are a video scene planner. Your ONLY job is to split a script into chunks at natural breakpoints.
 
-Split the following script into exactly ${chunksCount} scene chunks. Each chunk should:
-- Represent one distinct visual moment or idea that can be illustrated as a single image
-- Be roughly equal in word count (but prioritize natural breakpoints over exact equality)
-- End at a natural pause point (end of sentence or end of a thought)
-- Cover the ENTIRE script — no text should be left out
+Split the following script into exactly ${chunksCount} chunks. Each chunk should:
+- Represent one distinct visual moment or idea
+- Be roughly equal in word count (prioritize natural breakpoints over exact equality)
+- End at a natural pause point (end of sentence or thought)
+- Cover the ENTIRE script — no text left out
 
-For each chunk, write:
-- scene_description: A detailed visual description of what should be illustrated for this scene (50-80 words). Describe: the setting/location, which characters are present, their positions and actions, their facial expressions and body language, the camera angle (wide shot, medium shot, close-up), and the lighting/mood. Do NOT include any text, dialogue, speech bubbles, or words in the scene description — describe ONLY visual elements.
-- scene_emotion: The single dominant emotion of this scene (e.g., "curiosity", "loneliness", "warmth", "surprise", "calm", "anxiety", "comfort", "joy")
-- characters_present: An array of character names (matching the Character Bible names) that appear in this scene. Use "none" if no characters are present.
-
-Return as a valid JSON object with this EXACT structure:
+Return a JSON object with this EXACT structure:
 {
   "scenes": [
     {
       "chunk_index": 1,
-      "script_text": "string (the exact script text for this chunk — copy it word for word from the original script)",
-      "scene_description": "string (50-80 words, visual only, no text/dialogue)",
-      "scene_emotion": "string (single word)",
-      "characters_present": ["string"]
+      "script_text": "string (exact script text — word for word, no modifications)"
     }
   ]
 }
 
 IMPORTANT:
-- The chunk_index must be sequential starting from 1.
-- The combined script_text of all chunks must equal the ENTIRE original script. Do not add, remove, or modify any words.
+- chunk_index is sequential starting from 1.
+- The combined script_text of all chunks must equal the ENTIRE original script verbatim.
 - You must return EXACTLY ${chunksCount} chunks.
+- Do NOT add scene descriptions, emotions, or any other fields — ONLY chunk_index and script_text.
 
 Return ONLY the raw JSON. No markdown, no backticks, no explanation.
 
@@ -87,8 +82,80 @@ ${script}
 }
 
 /**
+ * Generates a composition-focused visual description for a single scene chunk.
+ * Receives the full Character Bible so it knows exactly which characters exist
+ * and what they look like — preventing hallucinated characters and appearance details.
+ */
+export function buildSceneDescriptionPrompt(
+  scriptText: string,
+  chunkIndex: number,
+  totalScenes: number,
+  bible: CharacterBible | null,
+  neighborContext?: { prev?: string; next?: string }
+): string {
+  const characters = bible?.characters || [];
+  const primarySetting = bible?.primary_setting || "Not specified";
+  const overallMood = bible?.overall_mood || "Not specified";
+
+  const rosterBlock = characters.length > 0
+    ? characters.map((c) => {
+        const fp = c.visual_fingerprint || c.appearance.slice(0, 80);
+        return `- ${c.name} (${c.type}): ${fp}`;
+      }).join("\n")
+    : "No characters defined.";
+
+  const neighborBlock = neighborContext
+    ? `\n=== SCENE CONTEXT (for narrative flow — describe ONLY the current scene) ===
+${neighborContext.prev ? `Previous scene: "${neighborContext.prev.slice(0, 150).trim()}..."` : "This is the first scene."}
+>>> CURRENT SCENE (describe this one):
+${neighborContext.next ? `Next scene: "${neighborContext.next.slice(0, 150).trim()}..."` : "This is the last scene."}\n`
+    : "";
+
+  return `You are an expert animation scene director. Write a COMPOSITION-FOCUSED description for ONE scene in an animated YouTube video.
+
+=== CONTEXT ===
+Scene ${chunkIndex} of ${totalScenes}.
+Primary setting: ${primarySetting}
+Mood: ${overallMood}
+
+=== CHARACTER ROSTER (these are the ONLY characters that exist in this video) ===
+${rosterBlock}
+
+⛔ STRICT RULE: These are the ONLY characters in this video. Do NOT invent, imagine, or reference any character, creature, or figure not listed above. If the script is ambiguous, ONLY use characters from this roster. characters_present MUST only contain names from this exact list.
+${neighborBlock}
+=== SCRIPT TEXT FOR THIS SCENE ===
+${scriptText}
+
+=== YOUR TASK ===
+Write a single JSON object:
+{
+  "scene_description": "string (40-60 words)",
+  "scene_emotion": "string (single word)",
+  "characters_present": ["string"]
+}
+
+Rules for scene_description (40-60 words — COMPOSITION ONLY):
+- State which characters from the roster are present by NAME ONLY
+- Describe what they are DOING (actions, gestures, body language)
+- Describe WHERE they are positioned in the frame (left, center, foreground, etc.)
+- Specify camera angle (wide shot, medium shot, close-up, over-the-shoulder, etc.)
+- Describe lighting direction and atmosphere
+- Do NOT describe character appearance, clothing, colors, or physical features — the Character Bible handles that
+- Do NOT describe the setting in detail — primary_setting handles that
+- Do NOT include dialogue, text, speech bubbles, or sound effects
+- Do NOT invent or add ANY character not in the roster above
+
+Rules for characters_present:
+- ONLY use exact character names from the CHARACTER ROSTER above
+- If no rostered characters appear in this scene, use ["none"]
+- NEVER add a name not in the roster — this causes downstream failures
+
+Return ONLY the raw JSON. No markdown, no backticks, no explanation.`;
+}
+
+/**
  * Phase 1 of hierarchical chunking: split a long script into narrative acts.
- * Each act is a self-contained segment with its own script_text.
+ * Text-only split — descriptions are generated separately.
  */
 export function buildActsPrompt(
   script: string,
@@ -132,39 +199,36 @@ ${script}
 }
 
 /**
- * Phase 2 of hierarchical chunking: chunk a single act into scenes.
- * Receives act text and the number of scenes to produce for that act.
+ * Phase 2 of hierarchical chunking: text-only split of a single act into scenes.
+ * Receives act text, optional story context from previous acts for continuity.
  */
 export function buildActChunkingPrompt(
   actText: string,
   scenesForAct: number,
   startIndex: number,
-  actTitle: string
+  actTitle: string,
+  previousActSummary?: string
 ): string {
-  return `You are a video scene planner for animated YouTube videos.
+  const contextBlock = previousActSummary
+    ? `\n=== STORY SO FAR ===\n${previousActSummary}\n`
+    : "";
 
-You are working on one act of a larger script. This act is titled "${actTitle}".
+  return `You are a video scene planner. Split this act into chunks at natural breakpoints.
 
-Split this act into exactly ${scenesForAct} scene chunks. Each chunk should:
-- Represent one distinct visual moment that can be illustrated as a single image
+This act is titled "${actTitle}".${contextBlock}
+
+Split this act into exactly ${scenesForAct} chunks. Each chunk should:
+- Represent one distinct visual moment
 - Be roughly equal in word count (prioritize natural breakpoints)
 - End at a natural pause point
 - Cover the ENTIRE act text — no words left out
 
-For each chunk, write:
-- scene_description: A detailed visual description (50-80 words). Describe: setting/location, characters present, their positions and actions, facial expressions, body language, camera angle, lighting/mood. Do NOT include text, dialogue, or speech bubbles.
-- scene_emotion: One dominant emotion (e.g., "curiosity", "loneliness", "warmth", "joy")
-- characters_present: Array of character names present in this scene.
-
-Return as a valid JSON object with this EXACT structure:
+Return a JSON object with this EXACT structure:
 {
   "scenes": [
     {
       "chunk_index": ${startIndex},
-      "script_text": "string (exact text from the act — word for word)",
-      "scene_description": "string (50-80 words, visual only)",
-      "scene_emotion": "string (single word)",
-      "characters_present": ["string"]
+      "script_text": "string (exact text from the act — word for word)"
     }
   ]
 }
@@ -173,6 +237,7 @@ IMPORTANT:
 - chunk_index starts at ${startIndex} and increments sequentially.
 - You must return EXACTLY ${scenesForAct} chunks.
 - The combined script_text must cover the ENTIRE act text below.
+- Do NOT add scene descriptions, emotions, or any other fields — ONLY chunk_index and script_text.
 
 Return ONLY the raw JSON. No markdown, no backticks, no explanation.
 
@@ -189,79 +254,70 @@ export function buildSceneImagePrompt(
   artStylePrompt: string,
   aspectRatio: string
 ): string {
-  // Build per-character fingerprint blocks with emphasis on the most critical identifying features
-  const characterBlocks = characterBible.characters.map((c) => {
-    const fingerprint = extractFingerprint(c);
-    return `
-CHARACTER: ${c.name}
-- Type: ${c.type}${c.species ? ` (${c.species})` : ""}
-- Appearance: ${c.appearance}
-- Visual Personality Cues: ${c.personality_visual_cues}
-- Default Pose: ${c.default_pose}
-⚠️ VISUAL FINGERPRINT — ${c.name} ALWAYS has: ${fingerprint}. This is NON-NEGOTIABLE in every single frame.`;
+  const presentNames = new Set(
+    scene.characters_present
+      .filter((n) => n.toLowerCase() !== "none")
+      .map((n) => n.toLowerCase())
+  );
+
+  const relevantCharacters = presentNames.size > 0
+    ? characterBible.characters.filter((c) => presentNames.has(c.name.toLowerCase()))
+    : [];
+
+  const characterBlocks = relevantCharacters.map((c) => {
+    const fingerprint = c.visual_fingerprint || extractFingerprintFallback(c);
+    return `CHARACTER: ${c.name} (${c.type}${c.species ? `, ${c.species}` : ""})
+Appearance: ${c.appearance}
+Pose: ${c.default_pose}
+⚠️ MUST HAVE: ${fingerprint}`;
   });
 
-  const characterDescriptions = characterBlocks.join("\n");
-
+  const isEnvironmentShot = characterBlocks.length === 0;
   const paletteStr = characterBible.color_palette.join(", ");
 
-  return `Generate a SINGLE scene screenshot from a 2D animated video. This is ONE continuous image — NOT a comic, NOT panels, NOT framed artwork. Think of it as a direct screenshot from an animated movie playing fullscreen on a TV.
+  return `Generate ONE single fullscreen scene screenshot from a 2D animated video — like pausing an animated movie on a TV.
 
-⛔⛔⛔ CRITICAL — READ THIS FIRST ⛔⛔⛔
-The #1 rule: generate ONE image with ONE scene. If the output contains more than one panel, frame, or viewpoint, it is IMMEDIATELY REJECTED.
+⛔ ABSOLUTE RULES — violation = immediate rejection:
+- ONE image, ONE scene, ONE camera angle. No panels, no comic layouts, no storyboards, no split compositions.
+- Full bleed: scene fills 100% of the canvas edge-to-edge. No borders, frames, margins, or empty space.
+- ZERO TEXT: No words, letters, numbers, watermarks, speech bubbles, or captions.
+${isEnvironmentShot ? "- This is an ENVIRONMENT/ATMOSPHERE shot — do NOT add any characters, people, animals, or figures." : "- ONLY include the characters listed below. Do NOT add any other characters, people, animals, or figures."}
 
-ABSOLUTELY FORBIDDEN — if ANY of these appear the image is invalid:
-- TWO OR MORE PANELS stacked vertically, horizontally, or in any grid/comic layout
-- MULTIPLE VIEWPOINTS or camera angles combined into one image (e.g. wide shot on top, close-up on bottom)
-- SPLIT COMPOSITIONS showing the same character from different angles or at different moments
-- STORYBOARD LAYOUTS with 2, 3, or more frames showing a sequence
-- COMIC STRIP FORMAT with any kind of panel dividers, gutters, or borders between sections
-- Horizontal lines, bars, or dividers splitting the image into sections
-- Black outlines, borders, or frames around the scene
-- White, cream, or beige margins/padding around the edges
-- Vignettes, circular frames, or decorative borders
-- Any empty/blank space at any edge
-
-The ONLY acceptable output is: ONE single continuous scene filling 100% of the canvas with ONE camera angle, ONE moment in time, ONE composition. The background extends edge-to-edge like a widescreen movie frame.
-
-=== FORMAT ===
-Output: A single ${aspectRatio} image. ONE scene. ONE moment. ONE camera angle. The painted scene extends to every pixel of the canvas — exactly like pausing an animated movie on fullscreen.
-
-=== VISUAL DNA (applies to ALL ${totalScenes} screenshots) ===
-Art Style: ${artStylePrompt}
-Locked Color Palette: ${paletteStr} — use ONLY these colors and their natural tints/shades.
-Overall Mood: ${characterBible.overall_mood}
-Primary Setting: ${characterBible.primary_setting}
-
-=== CHARACTER BIBLE ===
-${characterDescriptions}
+=== PRIORITY RULES ===
+- Character appearance: ONLY from the CHARACTER blocks below. Ignore any conflicting appearance details in the scene description.
+- Scene composition (who is where, doing what, camera angle): From the scene description below.
+- Setting: From the primary_setting below. The scene description may add scene-specific props.
 
 === SCENE #${scene.chunk_index} of ${totalScenes} ===
-Visual Description: ${scene.scene_description}
-Emotion/Mood: ${scene.scene_emotion}
-Characters Present: ${scene.characters_present.join(", ")}
+${scene.scene_description}
+Emotion: ${scene.scene_emotion}
 
-=== RULES ===
-1. SINGLE IMAGE, FULL BLEED: One continuous scene filling 100% of the canvas. The background extends to every edge. If I see any border, frame, margin, or multi-panel layout, the image is rejected.
-2. CHARACTER IDENTITY: Every character MUST match their Bible description exactly — same face, eyes, outfit, proportions, distinguishing features. Zero deviation.
-3. BACKGROUND: The setting matches the primary setting description. The background fills the entire canvas — no cropping into a smaller area.
-4. COLOR DISCIPLINE: Only the specified palette and natural tints. No white/cream backgrounds unless the story explicitly requires it.
-5. STYLE LOCK: Identical line weight, shading, and rendering quality across all ${totalScenes} images.
-6. ZERO TEXT: No words, numbers, letters, watermarks, speech bubbles, captions, or UI overlays.
-7. CONTINUITY: Screenshot ${scene.chunk_index} of ${totalScenes}. Seamless visual continuity across all screenshots.
+=== VISUAL STYLE ===
+Format: Single ${aspectRatio} image, full bleed.
+Art Style: ${artStylePrompt}
+Palette: ${paletteStr} (use only these colors and natural tints/shades)
+Setting: ${characterBible.primary_setting}
+Mood: ${characterBible.overall_mood}
 
-FINAL REMINDER: Generate EXACTLY ONE image. NOT a comic. NOT panels. NOT a storyboard. ONE single scene, like a movie screenshot. Generate now.`;
+=== CHARACTERS IN THIS SCENE ===
+${characterBlocks.length > 0 ? characterBlocks.join("\n\n") : "No characters — focus on environment, setting, and atmosphere only."}
+
+=== CONSISTENCY ===
+- Every character MUST match their appearance description exactly — same face, colors, outfit, proportions.
+- Identical line weight, shading, and rendering quality across all ${totalScenes} images.
+- Screenshot ${scene.chunk_index} of ${totalScenes} — maintain seamless visual continuity.
+
+Generate now.`;
 }
 
 /**
- * Extracts the 2-3 most distinctive visual features from a character
- * to create a "fingerprint" that reinforces identity across prompts.
+ * Fallback fingerprint extraction for characters that don't have
+ * a visual_fingerprint from the Bible (backward compatibility).
  */
-function extractFingerprint(character: Character): string {
+function extractFingerprintFallback(character: Character): string {
   const desc = character.appearance.toLowerCase();
   const features: string[] = [];
 
-  // Extract color-specific mentions (strongest anchors)
   const colorPatterns = desc.match(
     /(?:bright |dark |light |warm |deep |soft |pale |vivid )?\w+ (?:fur|hair|eyes|skin|coat|feathers|scales|dress|shirt|jacket|hat|scarf|bow|ribbon|collar|glasses)/g
   );
@@ -269,7 +325,6 @@ function extractFingerprint(character: Character): string {
     features.push(...colorPatterns.slice(0, 3));
   }
 
-  // If we didn't get enough, pull distinctive nouns
   if (features.length < 2) {
     const accessoryPatterns = desc.match(
       /(?:glasses|hat|scarf|bow|ribbon|collar|necklace|bracelet|earring|bandana|cape|apron|backpack|crown|tiara|monocle|patch)/g

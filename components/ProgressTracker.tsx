@@ -53,7 +53,7 @@ export default function ProgressTracker({
             : "complete",
     },
     {
-      label: "Splitting Script into Scenes",
+      label: "Splitting Script into Scenes & Generating Descriptions",
       state:
         pipelineStage === "chunking"
           ? "active"

@@ -2,6 +2,7 @@
 
 import { useProjectStore } from "@/store/useProjectStore";
 import { calculateSceneTimestamps } from "@/lib/chunker";
+import { RefreshCw } from "lucide-react";
 import SceneCard from "./SceneCard";
 
 interface SceneTimelineProps {
@@ -9,6 +10,7 @@ interface SceneTimelineProps {
   onEditRegenerate: (index: number, newDescription: string) => void;
   onApproveToggle: (index: number) => void;
   onRetry: (index: number) => void;
+  onRetryAllFailed?: () => void;
 }
 
 export default function SceneTimeline({
@@ -16,6 +18,7 @@ export default function SceneTimeline({
   onEditRegenerate,
   onApproveToggle,
   onRetry,
+  onRetryAllFailed,
 }: SceneTimelineProps) {
   const scenes = useProjectStore((s) => s.scenes);
   const duration = useProjectStore((s) => s.duration_seconds);
@@ -29,14 +32,26 @@ export default function SceneTimeline({
   return (
     <div className="w-full">
       {/* Summary */}
-      <div className="mb-6 text-sm text-text-secondary">
-        {scenes.length} scenes &bull; {duration}s &bull;{" "}
-        <span className="text-success">{completedCount} completed</span>
-        {failedCount > 0 && (
-          <>
-            {" "}
-            &bull; <span className="text-error">{failedCount} failed</span>
-          </>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="text-sm text-text-secondary">
+          {scenes.length} scenes &bull; {duration}s &bull;{" "}
+          <span className="text-success">{completedCount} completed</span>
+          {failedCount > 0 && (
+            <>
+              {" "}
+              &bull; <span className="text-error">{failedCount} failed</span>
+            </>
+          )}
+        </div>
+
+        {failedCount > 0 && onRetryAllFailed && (
+          <button
+            onClick={onRetryAllFailed}
+            className="flex items-center gap-1.5 rounded-lg border border-error/30 bg-error/5 px-3 py-1.5 text-xs font-medium text-error transition-colors hover:bg-error/10"
+          >
+            <RefreshCw size={12} />
+            Retry All Failed ({failedCount})
+          </button>
         )}
       </div>
 
@@ -62,7 +77,7 @@ export default function SceneTimeline({
               }`}
             />
 
-            <div className="w-full max-w-2xl">
+            <div className="w-full max-w-2xl" style={{ contentVisibility: "auto", containIntrinsicSize: "0 400px" }}>
               <SceneCard
                 scene={scene}
                 index={i}

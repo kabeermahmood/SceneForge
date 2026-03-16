@@ -62,6 +62,14 @@ export default function CharacterBible() {
                   </span>
                   {char.default_pose}
                 </p>
+                {char.visual_fingerprint && (
+                  <p>
+                    <span className="font-medium text-accent">
+                      Fingerprint:{" "}
+                    </span>
+                    {char.visual_fingerprint}
+                  </p>
+                )}
               </div>
             </div>
           );

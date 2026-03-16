@@ -19,6 +19,7 @@ export default function StoryboardGrid() {
           <button
             key={i}
             onClick={() => setSelectedIndex(i)}
+            style={{ contentVisibility: "auto", containIntrinsicSize: "0 200px" }}
             className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
               scene.status === "approved"
                 ? "border-success"
@@ -33,6 +34,8 @@ export default function StoryboardGrid() {
                 src={`data:${scene.image_mime_type};base64,${scene.image_base64}`}
                 alt={`Scene ${scene.chunk_index}`}
                 className="aspect-video w-full object-cover"
+                loading="lazy"
+                decoding="async"
               />
             ) : scene.status === "failed" ? (
               <div className="flex aspect-video w-full items-center justify-center bg-error/5">

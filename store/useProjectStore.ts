@@ -15,6 +15,7 @@ interface ProjectActions {
   setAspectRatio: (ratio: "16:9" | "9:16" | "1:1") => void;
   setSecondsPerScene: (seconds: number) => void;
   setProcessingMode: (mode: ProcessingMode) => void;
+  setStandardConcurrency: (val: 1 | 3) => void;
   setImageModel: (model: string) => void;
   setTextModel: (model: string) => void;
   setVideoTool: (tool: VideoTool) => void;
@@ -37,6 +38,7 @@ const initialState: ProjectState = {
   aspect_ratio: "16:9",
   seconds_per_scene: 8,
   processing_mode: "batch",
+  standard_concurrency: 1,
   image_model: "gemini-2.5-flash-image",
   text_model: "gemini-2.5-flash",
   video_tool: "grok",
@@ -60,6 +62,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setAspectRatio: (ratio) => set({ aspect_ratio: ratio }),
     setSecondsPerScene: (seconds) => set({ seconds_per_scene: seconds }),
     setProcessingMode: (mode) => set({ processing_mode: mode }),
+    setStandardConcurrency: (val) => set({ standard_concurrency: val }),
     setImageModel: (model) => set({ image_model: model }),
     setTextModel: (model) => set({ text_model: model }),
     setVideoTool: (tool) => set({ video_tool: tool }),

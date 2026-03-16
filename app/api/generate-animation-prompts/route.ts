@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGeminiClient } from "@/lib/gemini";
+import { geminiTextToJSON } from "@/lib/gemini";
 import { buildAnimationPromptsPrompt } from "@/lib/prompts";
 import type { CharacterBible } from "@/lib/types";
+
+export const maxDuration = 120;
 
 interface AnimationResult {
   chunk_index: number;
@@ -40,7 +42,6 @@ export async function POST(request: NextRequest) {
     const selectedModel = model || "gemini-2.5-flash";
     const sps = secondsPerScene || 8;
     const selectedTool = videoTool || "grok";
-    const client = getGeminiClient(apiKey);
 
     const prompt = buildAnimationPromptsPrompt(
       script,
@@ -50,30 +51,9 @@ export async function POST(request: NextRequest) {
       selectedTool
     );
 
-    const result = await client.models.generateContent({
-      model: selectedModel,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    const parsed = await geminiTextToJSON<AnimationResult[]>(prompt, apiKey, selectedModel, {
+      temperature: 0.4,
     });
-
-    const text = result.text || "";
-    const cleaned = text
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
-
-    let parsed: AnimationResult[];
-    try {
-      parsed = JSON.parse(cleaned) as AnimationResult[];
-    } catch {
-      console.error(
-        "[generate-animation-prompts] JSON parse failed. Raw:",
-        text.slice(0, 500)
-      );
-      return NextResponse.json(
-        { message: "Model returned invalid JSON. Try again or use a different model." },
-        { status: 500 }
-      );
-    }
 
     const resultMap = new Map<number, AnimationResult>();
     for (const item of parsed) {

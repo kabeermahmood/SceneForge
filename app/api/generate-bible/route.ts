@@ -3,6 +3,8 @@ import { geminiTextToJSON } from "@/lib/gemini";
 import { buildCharacterBiblePrompt } from "@/lib/prompts";
 import type { CharacterBible } from "@/lib/types";
 
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest) {
   try {
     const { script, apiKey, model } = await request.json();
@@ -33,11 +35,15 @@ export async function POST(request: NextRequest) {
 
     const textModel = typeof model === "string" && model ? model : "gemini-2.5-flash";
 
-    let bible: CharacterBible;
-    try {
-      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel);
-    } catch {
-      bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel);
+    const bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel, {
+      maxOutputTokens: 4096,
+      temperature: 0.4,
+    });
+
+    for (const character of bible.characters) {
+      if (!character.visual_fingerprint) {
+        character.visual_fingerprint = "";
+      }
     }
 
     return NextResponse.json(bible);

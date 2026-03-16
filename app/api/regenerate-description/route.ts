@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { getGeminiClient } from "@/lib/gemini";
+import { geminiTextToJSON } from "@/lib/gemini";
+
+export const maxDuration = 60;
+
+interface DescriptionResult {
+  description: string;
+}
 
 export async function POST(request: Request) {
   try {
@@ -13,8 +19,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-
-    const client = getGeminiClient(apiKey);
 
     const characterSummary = characterBible.characters
       .map(
@@ -51,14 +55,17 @@ ${previousBlock}${guidanceBlock}
 === SCRIPT TEXT FOR THIS SCENE ===
 ${scriptText}
 
-Return ONLY the scene description as plain text. No JSON, no markdown, no labels. Just the 60-90 word visual description.`;
+Return a JSON object with this EXACT structure:
+{ "description": "your 60-90 word visual description here" }
 
-    const result = await client.models.generateContent({
-      model: textModel,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+Return ONLY the raw JSON. No markdown, no backticks.`;
+
+    const result = await geminiTextToJSON<DescriptionResult>(prompt, apiKey, textModel, {
+      maxOutputTokens: 1024,
+      temperature: 0.5,
     });
 
-    const description = (result.text || "").trim();
+    const description = (result.description || "").trim();
 
     if (!description || description.length < 20) {
       return NextResponse.json(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Check, X, RefreshCw, Pencil, ChevronDown, ChevronUp, Loader2, Download, ClipboardCopy } from "lucide-react";
 import type { Scene } from "@/lib/types";
 
@@ -14,7 +14,7 @@ interface SceneCardProps {
   onRetry?: (index: number) => void;
 }
 
-export default function SceneCard({
+function SceneCardInner({
   scene,
   index,
   timestamp,
@@ -76,6 +76,8 @@ export default function SceneCard({
             src={`data:${scene.image_mime_type};base64,${scene.image_base64}`}
             alt={`Scene ${scene.chunk_index}`}
             className="w-full"
+            loading="lazy"
+            decoding="async"
           />
         ) : scene.status === "generating" ? (
           <div className="animate-shimmer flex aspect-video w-full items-center justify-center">
@@ -260,3 +262,13 @@ export default function SceneCard({
     </div>
   );
 }
+
+const SceneCard = memo(SceneCardInner, (prev, next) =>
+  prev.scene.status === next.scene.status &&
+  prev.scene.image_base64 === next.scene.image_base64 &&
+  prev.scene.scene_description === next.scene.scene_description &&
+  prev.scene.animation_prompt === next.scene.animation_prompt &&
+  prev.index === next.index
+);
+
+export default SceneCard;
