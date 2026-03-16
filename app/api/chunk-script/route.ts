@@ -77,6 +77,8 @@ export async function POST(request: NextRequest) {
 
     const bible: CharacterBible | null = characterBible || null;
 
+    console.log(`[chunk-script] Received: chunksCount=${chunksCount}, scriptLength=${script.length}`);
+
     let textChunks: TextChunk[];
 
     if (chunksCount <= HIERARCHICAL_THRESHOLD) {

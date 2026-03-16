@@ -141,6 +141,9 @@ export interface ProjectState {
   error_message: string | null;
   animation_prompts_generated: boolean;
   animation_prompt_model: string;
+  auto_split: boolean;
+  script_parts: string[];
+  current_part_index: number;
 }
 
 export type ArtStyleOption = {

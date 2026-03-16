@@ -28,6 +28,9 @@ interface ProjectActions {
   setErrorMessage: (message: string | null) => void;
   setAnimationPromptsGenerated: (val: boolean) => void;
   setAnimationPromptModel: (model: string) => void;
+  setAutoSplit: (val: boolean) => void;
+  setScriptParts: (parts: string[]) => void;
+  setCurrentPartIndex: (index: number) => void;
   resetProject: () => void;
 }
 
@@ -50,6 +53,9 @@ const initialState: ProjectState = {
   error_message: null,
   animation_prompts_generated: false,
   animation_prompt_model: "gemini-2.5-flash",
+  auto_split: false,
+  script_parts: [],
+  current_part_index: 0,
 };
 
 export const useProjectStore = create<ProjectState & ProjectActions>(
@@ -89,6 +95,9 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setErrorMessage: (message) => set({ error_message: message }),
     setAnimationPromptsGenerated: (val) => set({ animation_prompts_generated: val }),
     setAnimationPromptModel: (model) => set({ animation_prompt_model: model }),
+    setAutoSplit: (val) => set({ auto_split: val }),
+    setScriptParts: (parts) => set({ script_parts: parts }),
+    setCurrentPartIndex: (index) => set({ current_part_index: index }),
     resetProject: () => set(initialState),
   })
 );

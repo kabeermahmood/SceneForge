@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Calculator,
   MessageSquareText,
+  SplitSquareVertical,
 } from "lucide-react";
 
 const MODES: {
@@ -48,6 +49,9 @@ export default function ProcessingConfig() {
   const setTextModel = useProjectStore((s) => s.setTextModel);
   const durationSeconds = useProjectStore((s) => s.duration_seconds);
   const secondsPerScene = useProjectStore((s) => s.seconds_per_scene);
+  const autoSplit = useProjectStore((s) => s.auto_split);
+  const setAutoSplit = useProjectStore((s) => s.setAutoSplit);
+  const scriptLength = useProjectStore((s) => s.script.length);
 
   const selectedModel = IMAGE_MODELS.find((m) => m.id === imageModel);
   const selectedTextModel = TEXT_MODELS.find((m) => m.id === textModel);
@@ -104,6 +108,54 @@ export default function ProcessingConfig() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Auto-Split for Large Scripts */}
+      <div>
+        <button
+          onClick={() => setAutoSplit(!autoSplit)}
+          className={`flex w-full items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
+            autoSplit
+              ? "border-accent bg-accent/10"
+              : "border-border bg-surface hover:border-text-secondary/30"
+          }`}
+        >
+          <SplitSquareVertical
+            size={20}
+            className={`mt-0.5 shrink-0 ${autoSplit ? "text-accent" : "text-text-secondary"}`}
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-text-primary">
+                Auto-Split for Large Scripts
+              </span>
+              {autoSplit && (
+                <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
+                  ON
+                </span>
+              )}
+            </div>
+            <span className="mt-0.5 block text-xs leading-relaxed text-text-secondary">
+              Automatically divide your script into smaller parts for better quality. Each part generates separately with a review step in between.
+            </span>
+            {autoSplit && scriptLength > 0 && (
+              <span className="mt-1.5 block text-[11px] font-medium text-accent">
+                ~{Math.max(1, Math.ceil(scriptLength / 2000))} part{Math.ceil(scriptLength / 2000) !== 1 ? "s" : ""} estimated ({scriptLength.toLocaleString()} chars)
+              </span>
+            )}
+          </div>
+          <div
+            className={`mt-1 h-5 w-9 shrink-0 rounded-full transition-colors ${
+              autoSplit ? "bg-accent" : "bg-border"
+            }`}
+          >
+            <div
+              className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                autoSplit ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </div>
+        </button>
       </div>
 
       {/* Standard Mode Concurrency */}

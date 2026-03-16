@@ -21,10 +21,13 @@ import {
   BookOpen,
   FilePlus2,
   X,
+  SplitSquareVertical,
+  ArrowRight,
 } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 import { ART_STYLES, IMAGE_MODELS } from "@/lib/types";
 import { buildSceneImagePrompt } from "@/lib/prompts";
+import { splitScript } from "@/lib/scriptSplitter";
 import { SAMPLE_SCRIPT } from "@/lib/utils";
 import ScriptInput from "@/components/ScriptInput";
 import DurationInput from "@/components/DurationInput";
@@ -91,6 +94,11 @@ function HomeContent() {
   const imageModel = useProjectStore((s) => s.image_model);
   const textModel = useProjectStore((s) => s.text_model);
   const standardConcurrency = useProjectStore((s) => s.standard_concurrency);
+  const autoSplit = useProjectStore((s) => s.auto_split);
+  const scriptParts = useProjectStore((s) => s.script_parts);
+  const currentPartIndex = useProjectStore((s) => s.current_part_index);
+  const setScriptParts = useProjectStore((s) => s.setScriptParts);
+  const setCurrentPartIndex = useProjectStore((s) => s.setCurrentPartIndex);
   const setScenes = useProjectStore((s) => s.setScenes);
   const appendScenes = useProjectStore((s) => s.appendScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
@@ -183,16 +191,31 @@ function HomeContent() {
         return;
       }
 
-      setPipelineStage("chunking");
-      const chunksCount = Math.max(
+      // ── Auto-split: divide script into parts, use only Part 1 for initial run ──
+      let scriptForChunking = script;
+      const totalDesiredScenes = Math.max(
         4,
         Math.min(Math.round(durationSeconds / secondsPerScene), 100)
       );
+      let chunksCount = totalDesiredScenes;
+
+      if (autoSplit) {
+        const parts = splitScript(script);
+        setScriptParts(parts);
+        setCurrentPartIndex(0);
+        scriptForChunking = parts[0];
+        const totalChars = parts.reduce((sum, p) => sum + p.length, 0);
+        const proportion = parts[0].length / totalChars;
+        chunksCount = Math.max(4, Math.round(totalDesiredScenes * proportion));
+        console.log(`[SceneForge] Auto-split: ${parts.length} parts, Part 1 = ${parts[0].length}/${totalChars} chars (${Math.round(proportion * 100)}%) → ${chunksCount} scenes`);
+      }
+
+      setPipelineStage("chunking");
 
       const chunkRes = await fetch("/api/chunk-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script, chunksCount, apiKey, model: textModel, characterBible: bible }),
+        body: JSON.stringify({ script: scriptForChunking, chunksCount, apiKey, model: textModel, characterBible: bible }),
         signal,
       });
       if (!chunkRes.ok) {
@@ -329,6 +352,7 @@ function HomeContent() {
     processingMode,
     imageModel,
     textModel,
+    autoSplit,
     getArtStylePrompt,
     setPipelineStage,
     setErrorMessage,
@@ -336,6 +360,8 @@ function HomeContent() {
     setScenes,
     updateScene,
     setCurrentSceneIndex,
+    setScriptParts,
+    setCurrentPartIndex,
   ]);
 
   // ====== Continue generating remaining scenes after hero approval ======
@@ -1174,6 +1200,190 @@ function HomeContent() {
     setEta(null);
   }, [continuationScript, continuationSceneCount, appendScenes, updateScene, setCurrentSceneIndex, setPipelineStage, setErrorMessage, getArtStylePrompt]);
 
+  // ====== Continue to next auto-split part ======
+  const continueToNextPart = useCallback(async () => {
+    const apiKey = getApiKey();
+    const state = useProjectStore.getState();
+    const bible = state.character_bible;
+    const parts = state.script_parts;
+    const nextIdx = state.current_part_index + 1;
+
+    if (!apiKey || !bible || nextIdx >= parts.length) return;
+
+    setCurrentPartIndex(nextIdx);
+    cancelledRef.current = false;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
+    sceneTimesRef.current = [];
+    setEta(null);
+
+    const existingCount = state.scenes.length;
+    const heroScene = state.scenes[0];
+    const heroImage = heroScene?.image_base64
+      ? { data: heroScene.image_base64, mimeType: heroScene.image_mime_type || "image/png" }
+      : null;
+
+    const totalDesiredScenes = Math.max(
+      4,
+      Math.min(Math.round(state.duration_seconds / state.seconds_per_scene), 100)
+    );
+    const totalChars = parts.reduce((sum, p) => sum + p.length, 0);
+    const proportion = parts[nextIdx].length / totalChars;
+    const scenesForThisPart = Math.max(4, Math.round(totalDesiredScenes * proportion));
+
+    try {
+      setPipelineStage("chunking");
+      setErrorMessage(null);
+
+      const chunkRes = await fetch("/api/chunk-script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: parts[nextIdx],
+          chunksCount: scenesForThisPart,
+          apiKey,
+          model: state.text_model,
+          characterBible: bible,
+        }),
+        signal,
+      });
+
+      if (!chunkRes.ok) {
+        const err = await chunkRes.json();
+        throw new Error(err.message || `Failed to chunk Part ${nextIdx + 1}`);
+      }
+
+      const chunkData = await chunkRes.json();
+      const rawScenes = chunkData.scenes.map(
+        (s: {
+          chunk_index: number;
+          script_text: string;
+          scene_description: string;
+          scene_emotion: string;
+          characters_present: string[];
+        }) => ({
+          chunk_index: s.chunk_index,
+          script_text: s.script_text,
+          scene_description: s.scene_description,
+          scene_emotion: s.scene_emotion,
+          characters_present: s.characters_present,
+          image_base64: null,
+          image_mime_type: null,
+          status: "pending" as const,
+          generation_prompt: "",
+          error_message: null,
+          animation_prompt: null,
+          camera_movement: null,
+          suggested_transition: null,
+        })
+      );
+
+      appendScenes(rawScenes);
+
+      if (cancelledRef.current) { setPipelineStage("complete"); return; }
+
+      setPipelineStage("generating_images");
+      const artStylePrompt = getArtStylePrompt();
+      const currentModel = state.image_model;
+      const allScenes = useProjectStore.getState().scenes;
+      const newCount = rawScenes.length;
+
+      const scenePrompts: { idx: number; prompt: string }[] = [];
+      for (let i = 0; i < newCount; i++) {
+        const globalIdx = existingCount + i;
+        const scene = allScenes[globalIdx];
+        const prompt = buildSceneImagePrompt(
+          scene,
+          allScenes.length,
+          bible,
+          artStylePrompt,
+          state.aspect_ratio
+        );
+        updateScene(globalIdx, { generation_prompt: prompt, status: "generating" });
+        scenePrompts.push({ idx: globalIdx, prompt });
+      }
+
+      const CONCURRENCY = state.standard_concurrency;
+      console.log(`[SceneForge] Auto-split Part ${nextIdx + 1}/${parts.length} — ${newCount} scenes, concurrency: ${CONCURRENCY}`);
+
+      const generateOne = async (item: { idx: number; prompt: string }) => {
+        setCurrentSceneIndex(item.idx);
+        const startTime = Date.now();
+        try {
+          const reqBody: Record<string, unknown> = {
+            prompt: item.prompt,
+            apiKey,
+            model: currentModel,
+            aspectRatio: state.aspect_ratio,
+          };
+          if (heroImage) reqBody.referenceImage = heroImage;
+
+          const imgRes = await fetch("/api/generate-scene", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(reqBody),
+            signal,
+          });
+
+          if (imgRes.ok) {
+            const imgData = await imgRes.json();
+            updateScene(item.idx, {
+              image_base64: imgData.image_base64,
+              image_mime_type: imgData.mime_type,
+              status: "completed",
+            });
+          } else {
+            const err = await imgRes.json();
+            updateScene(item.idx, { status: "failed", error_message: err.message || "Generation failed" });
+          }
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          updateScene(item.idx, {
+            status: "failed",
+            error_message: err instanceof Error ? err.message : "Generation failed",
+          });
+        }
+        sceneTimesRef.current.push((Date.now() - startTime) / 1000);
+      };
+
+      for (let i = 0; i < scenePrompts.length; i += CONCURRENCY) {
+        if (cancelledRef.current) break;
+        const chunk = scenePrompts.slice(i, i + CONCURRENCY);
+        await Promise.all(chunk.map((item) => generateOne(item)));
+
+        if (sceneTimesRef.current.length > 0) {
+          const avg = sceneTimesRef.current.reduce((a, b) => a + b, 0) / sceneTimesRef.current.length;
+          const completedSoFar = i + chunk.length;
+          const remaining = ((scenePrompts.length - completedSoFar) / CONCURRENCY) * avg;
+          setEta(remaining > 60
+            ? `~${Math.ceil(remaining / 60)} min remaining`
+            : `~${Math.ceil(remaining)}s remaining`
+          );
+        }
+      }
+
+      setEta(null);
+      setPipelineStage("complete");
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setPipelineStage("complete");
+      } else {
+        const hasAny = useProjectStore.getState().scenes.some(
+          (s) => s.status === "completed" || s.status === "approved"
+        );
+        if (hasAny) {
+          setPipelineStage("complete");
+        } else {
+          setPipelineStage("error");
+          setErrorMessage(err instanceof Error ? err.message : "Auto-split continuation failed");
+        }
+      }
+      setEta(null);
+    }
+  }, [appendScenes, updateScene, setCurrentSceneIndex, setPipelineStage, setErrorMessage, setCurrentPartIndex, getArtStylePrompt]);
+
   const handleNewProject = () => {
     setShowNewProjectConfirm(true);
   };
@@ -1611,6 +1821,65 @@ function HomeContent() {
             </button>
           </div>
         </header>
+
+        {/* Auto-Split: Continue to Next Part Banner */}
+        {autoSplit && scriptParts.length > 1 && currentPartIndex < scriptParts.length - 1 && (
+          <div className="mt-4 overflow-hidden rounded-xl border-2 border-accent/40 bg-surface">
+            <div className="flex items-center gap-3 border-b border-border bg-accent/5 px-5 py-3">
+              <SplitSquareVertical size={18} className="text-accent" />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-text-primary">
+                  Part {currentPartIndex + 1} of {scriptParts.length} Complete
+                </p>
+                <p className="text-xs text-text-secondary">
+                  Review and edit scenes above, then continue to the next part when ready.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between px-5 py-4">
+              <div className="flex gap-4 text-[11px] text-text-secondary">
+                {scriptParts.map((_, idx) => (
+                  <span
+                    key={idx}
+                    className={`flex items-center gap-1 ${
+                      idx <= currentPartIndex ? "font-semibold text-accent" : ""
+                    }`}
+                  >
+                    <span
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+                        idx < currentPartIndex
+                          ? "bg-success/20 text-success"
+                          : idx === currentPartIndex
+                            ? "bg-accent/20 text-accent"
+                            : "bg-border text-text-secondary"
+                      }`}
+                    >
+                      {idx < currentPartIndex ? "✓" : idx + 1}
+                    </span>
+                    Part {idx + 1}
+                  </span>
+                ))}
+              </div>
+              <button
+                onClick={continueToNextPart}
+                className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-background transition-all hover:bg-accent-hover active:scale-[0.99]"
+              >
+                Continue to Part {currentPartIndex + 2}
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Auto-Split: All Parts Done */}
+        {autoSplit && scriptParts.length > 1 && currentPartIndex >= scriptParts.length - 1 && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-success/30 bg-success/5 px-5 py-3">
+            <CheckCircle2 size={18} className="text-success" />
+            <p className="text-sm font-medium text-text-primary">
+              All {scriptParts.length} parts complete — {scenes.length} total scenes generated
+            </p>
+          </div>
+        )}
 
         {/* Continuation Script Input */}
         {showContinuation && (
