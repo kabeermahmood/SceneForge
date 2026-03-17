@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { X, ExternalLink } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
+import PromptTemplatesEditor from "./PromptTemplatesEditor";
+import AdvancedParamsPanel from "./AdvancedParamsPanel";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -126,6 +128,14 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               How long each scene image stays on screen. Lower = more images,
               higher = fewer images.
             </p>
+          </div>
+
+          <div className="border-t border-border pt-6">
+            <PromptTemplatesEditor />
+          </div>
+
+          <div className="border-t border-border pt-6">
+            <AdvancedParamsPanel />
           </div>
         </div>
       </div>

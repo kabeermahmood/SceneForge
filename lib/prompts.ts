@@ -1,6 +1,13 @@
 import type { Character, CharacterBible, Scene } from "./types";
 
-export function buildCharacterBiblePrompt(script: string): string {
+function interpolateTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+}
+
+export function buildCharacterBiblePrompt(script: string, template?: string): string {
+  if (template) {
+    return interpolateTemplate(template, { script });
+  }
   return `You are an expert animation character designer and story analyst.
 
 Analyze the following script for an animated YouTube video. Identify ALL characters mentioned or implied in the script (humans, animals, objects that act as characters).
@@ -91,8 +98,18 @@ export function buildSceneDescriptionPrompt(
   chunkIndex: number,
   totalScenes: number,
   bible: CharacterBible | null,
-  neighborContext?: { prev?: string; next?: string }
+  neighborContext?: { prev?: string; next?: string },
+  template?: string
 ): string {
+  if (template) {
+    return interpolateTemplate(template, {
+      scriptText,
+      chunkIndex: String(chunkIndex),
+      totalScenes: String(totalScenes),
+      primarySetting: bible?.primary_setting || "",
+      overallMood: bible?.overall_mood || "",
+    });
+  }
   const characters = bible?.characters || [];
   const primarySetting = bible?.primary_setting || "Not specified";
   const overallMood = bible?.overall_mood || "Not specified";
@@ -252,8 +269,22 @@ export function buildSceneImagePrompt(
   totalScenes: number,
   characterBible: CharacterBible,
   artStylePrompt: string,
-  aspectRatio: string
+  aspectRatio: string,
+  template?: string
 ): string {
+  if (template) {
+    return interpolateTemplate(template, {
+      chunkIndex: String(scene.chunk_index),
+      totalScenes: String(totalScenes),
+      sceneDescription: scene.scene_description,
+      sceneEmotion: scene.scene_emotion,
+      artStylePrompt,
+      aspectRatio,
+      primarySetting: characterBible.primary_setting,
+      overallMood: characterBible.overall_mood,
+      colorPalette: characterBible.color_palette.join(", "),
+    });
+  }
   const presentNames = new Set(
     scene.characters_present
       .filter((n) => n.toLowerCase() !== "none")

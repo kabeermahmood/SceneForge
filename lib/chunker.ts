@@ -1,9 +1,11 @@
 export function calculateChunkCount(
   durationSeconds: number,
-  secondsPerScene: number
+  secondsPerScene: number,
+  minScenes = 4,
+  maxScenes = 100
 ): number {
   const count = Math.round(durationSeconds / secondsPerScene);
-  return Math.max(4, Math.min(count, 100));
+  return Math.max(minScenes, Math.min(count, maxScenes));
 }
 
 export function calculateSceneTimestamps(

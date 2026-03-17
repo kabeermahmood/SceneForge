@@ -1,11 +1,15 @@
 import { create } from "zustand";
 import type {
+  AdvancedParams,
+  ArtStyleOption,
   CharacterBible,
   ProcessingMode,
   ProjectState,
+  PromptTemplates,
   Scene,
   VideoTool,
 } from "@/lib/types";
+import { DEFAULT_ADVANCED_PARAMS } from "@/lib/types";
 
 interface ProjectActions {
   setScript: (script: string) => void;
@@ -20,6 +24,8 @@ interface ProjectActions {
   setTextModel: (model: string) => void;
   setVideoTool: (tool: VideoTool) => void;
   setCharacterBible: (bible: CharacterBible) => void;
+  setBibleSource: (source: "ai" | "custom") => void;
+  setScenesSource: (source: "ai" | "custom") => void;
   setScenes: (scenes: Scene[]) => void;
   appendScenes: (newScenes: Scene[]) => void;
   updateScene: (index: number, updates: Partial<Scene>) => void;
@@ -31,7 +37,20 @@ interface ProjectActions {
   setAutoSplit: (val: boolean) => void;
   setScriptParts: (parts: string[]) => void;
   setCurrentPartIndex: (index: number) => void;
+  setPromptTemplates: (templates: PromptTemplates) => void;
+  setAdvancedParams: (params: Partial<AdvancedParams>) => void;
+  setSavedCustomStyles: (styles: ArtStyleOption[]) => void;
   resetProject: () => void;
+}
+
+function loadSavedStyles(): ArtStyleOption[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem("sceneforge_custom_styles");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
 }
 
 const initialState: ProjectState = {
@@ -47,6 +66,8 @@ const initialState: ProjectState = {
   text_model: "gemini-2.5-flash",
   video_tool: "grok",
   character_bible: null,
+  bible_source: "ai",
+  scenes_source: "ai",
   scenes: [],
   pipeline_stage: "idle",
   current_scene_index: 0,
@@ -56,11 +77,15 @@ const initialState: ProjectState = {
   auto_split: false,
   script_parts: [],
   current_part_index: 0,
+  prompt_templates: {},
+  advanced_params: { ...DEFAULT_ADVANCED_PARAMS },
+  saved_custom_styles: [],
 };
 
 export const useProjectStore = create<ProjectState & ProjectActions>(
   (set) => ({
     ...initialState,
+    saved_custom_styles: loadSavedStyles(),
 
     setScript: (script) => set({ script }),
     setDuration: (seconds) => set({ duration_seconds: seconds }),
@@ -74,6 +99,8 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setTextModel: (model) => set({ text_model: model }),
     setVideoTool: (tool) => set({ video_tool: tool }),
     setCharacterBible: (bible) => set({ character_bible: bible }),
+    setBibleSource: (source) => set({ bible_source: source }),
+    setScenesSource: (source) => set({ scenes_source: source }),
     setScenes: (scenes) => set({ scenes }),
     appendScenes: (newScenes) =>
       set((state) => {
@@ -98,6 +125,16 @@ export const useProjectStore = create<ProjectState & ProjectActions>(
     setAutoSplit: (val) => set({ auto_split: val }),
     setScriptParts: (parts) => set({ script_parts: parts }),
     setCurrentPartIndex: (index) => set({ current_part_index: index }),
+    setPromptTemplates: (templates) =>
+      set((state) => ({ prompt_templates: { ...state.prompt_templates, ...templates } })),
+    setAdvancedParams: (params) =>
+      set((state) => ({ advanced_params: { ...state.advanced_params, ...params } })),
+    setSavedCustomStyles: (styles) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sceneforge_custom_styles", JSON.stringify(styles));
+      }
+      set({ saved_custom_styles: styles });
+    },
     resetProject: () => set(initialState),
   })
 );

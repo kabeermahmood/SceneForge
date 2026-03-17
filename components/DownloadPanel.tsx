@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Package, FileJson, BookOpen, Loader2, Film, Download, ChevronDown } from "lucide-react";
+import { Package, FileJson, BookOpen, Loader2, Film, Download, ChevronDown, FolderDown } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 import { calculateSceneTimestamps } from "@/lib/chunker";
 import { TEXT_MODELS, VIDEO_TOOLS } from "@/lib/types";
@@ -114,6 +114,47 @@ export default function DownloadPanel() {
     const a = document.createElement("a");
     a.href = url;
     a.download = "sceneforge_character_bible.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadFullProject = () => {
+    const state = useProjectStore.getState();
+    const exportData = {
+      _format: "sceneforge_project_v1",
+      project: {
+        art_style: state.art_style,
+        art_style_custom: state.art_style_custom,
+        aspect_ratio: state.aspect_ratio,
+        duration_seconds: state.duration_seconds,
+        seconds_per_scene: state.seconds_per_scene,
+        processing_mode: state.processing_mode,
+        image_model: state.image_model,
+        text_model: state.text_model,
+        video_tool: state.video_tool,
+      },
+      script: state.script,
+      character_bible: state.character_bible,
+      scenes: state.scenes.map((s) => ({
+        chunk_index: s.chunk_index,
+        script_text: s.script_text,
+        scene_description: s.scene_description,
+        scene_emotion: s.scene_emotion,
+        characters_present: s.characters_present,
+        generation_prompt: s.generation_prompt,
+        animation_prompt: s.animation_prompt,
+        camera_movement: s.camera_movement,
+        suggested_transition: s.suggested_transition,
+        status: s.status,
+      })),
+      prompt_templates: state.prompt_templates,
+      advanced_params: state.advanced_params,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sceneforge_project.json";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -237,6 +278,14 @@ export default function DownloadPanel() {
         >
           <BookOpen size={14} />
           Character Bible
+        </button>
+
+        <button
+          onClick={downloadFullProject}
+          className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+        >
+          <FolderDown size={14} />
+          Full Project
         </button>
       </div>
 

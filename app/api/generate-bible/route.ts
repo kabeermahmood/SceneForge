@@ -7,7 +7,7 @@ export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, apiKey, model } = await request.json();
+    const { script, apiKey, model, advancedParams, bibleTemplate } = await request.json();
 
     if (!script || typeof script !== "string" || script.length < 100) {
       return NextResponse.json(
@@ -31,13 +31,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prompt = buildCharacterBiblePrompt(script);
+    const prompt = buildCharacterBiblePrompt(script, bibleTemplate || undefined);
 
     const textModel = typeof model === "string" && model ? model : "gemini-2.5-flash";
+    const bibleTemp = advancedParams?.bible_temperature ?? 0.4;
+    const bibleMaxTokens = advancedParams?.bible_max_tokens ?? 4096;
 
     const bible = await geminiTextToJSON<CharacterBible>(prompt, apiKey, textModel, {
-      maxOutputTokens: 4096,
-      temperature: 0.4,
+      maxOutputTokens: bibleMaxTokens,
+      temperature: bibleTemp,
     });
 
     for (const character of bible.characters) {

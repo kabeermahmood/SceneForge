@@ -51,8 +51,11 @@ const MAX_ACTS = 12;
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, chunksCount, apiKey, model, characterBible } = await request.json();
+    const { script, chunksCount, apiKey, model, characterBible, advancedParams } = await request.json();
     const textModel = typeof model === "string" && model ? model : "gemini-2.5-flash";
+    const chunkTemp = advancedParams?.chunking_temperature ?? 0.3;
+    const descTemp = advancedParams?.description_temperature ?? 0.3;
+    const descMaxTokens = advancedParams?.description_max_tokens ?? 1024;
 
     if (!script || typeof script !== "string" || script.length < 100) {
       return NextResponse.json(
@@ -83,11 +86,11 @@ export async function POST(request: NextRequest) {
 
     if (chunksCount <= HIERARCHICAL_THRESHOLD) {
       console.log(`[chunk-script] Simple mode — ${chunksCount} scenes, model: ${textModel}`);
-      textChunks = await splitText(script, chunksCount, apiKey, textModel);
+      textChunks = await splitText(script, chunksCount, apiKey, textModel, chunkTemp);
     } else {
       const actCount = Math.min(Math.ceil(chunksCount / MAX_SCENES_PER_ACT), MAX_ACTS);
       console.log(`[chunk-script] Hierarchical mode — ${chunksCount} scenes across ${actCount} acts, model: ${textModel}`);
-      textChunks = await hierarchicalSplit(script, chunksCount, actCount, apiKey, textModel);
+      textChunks = await hierarchicalSplit(script, chunksCount, actCount, apiKey, textModel, chunkTemp);
     }
 
     console.log(`[chunk-script] Text split complete — ${textChunks.length} chunks. Generating descriptions...`);
@@ -97,7 +100,9 @@ export async function POST(request: NextRequest) {
       textChunks.length,
       bible,
       apiKey,
-      textModel
+      textModel,
+      descMaxTokens,
+      descTemp
     );
 
     return NextResponse.json({ scenes: allScenes });
@@ -115,12 +120,13 @@ async function splitText(
   script: string,
   chunksCount: number,
   apiKey: string,
-  textModel: string
+  textModel: string,
+  chunkTemp = 0.3
 ): Promise<TextChunk[]> {
   const prompt = buildChunkingPrompt(script, chunksCount);
 
   let data = await geminiTextToJSON<TextChunkResponse>(prompt, apiKey, textModel, {
-    temperature: 0.3,
+    temperature: chunkTemp,
   });
 
   if (data.scenes.length !== chunksCount) {
@@ -141,7 +147,8 @@ async function splitActChunks(
   actTitle: string,
   previousActSummary: string | undefined,
   apiKey: string,
-  textModel: string
+  textModel: string,
+  temperature = 0.3
 ): Promise<TextChunk[]> {
   const actPrompt = buildActChunkingPrompt(
     actText,
@@ -153,7 +160,7 @@ async function splitActChunks(
 
   try {
     const actChunks = await geminiTextToJSON<TextChunkResponse>(actPrompt, apiKey, textModel, {
-      temperature: 0.3,
+      temperature,
     });
 
     for (let i = 0; i < actChunks.scenes.length; i++) {
@@ -179,14 +186,14 @@ async function splitActChunks(
       const firstChunks = await splitActChunks(
         firstHalf, firstCount, startIndex,
         `${actTitle} (Part 1)`, previousActSummary,
-        apiKey, textModel
+        apiKey, textModel, temperature
       );
 
       const secondStart = startIndex + firstChunks.length;
       const secondChunks = await splitActChunks(
         secondHalf, secondCount, secondStart,
         `${actTitle} (Part 2)`, previousActSummary,
-        apiKey, textModel
+        apiKey, textModel, temperature
       );
 
       return [...firstChunks, ...secondChunks];
@@ -201,12 +208,13 @@ async function hierarchicalSplit(
   totalScenes: number,
   actCount: number,
   apiKey: string,
-  textModel: string
+  textModel: string,
+  chunkingTemp = 0.3
 ): Promise<TextChunk[]> {
   const actsPrompt = buildActsPrompt(script, actCount, totalScenes);
 
   const actsData = await geminiTextToJSON<ActResponse>(actsPrompt, apiKey, textModel, {
-    temperature: 0.3,
+    temperature: chunkingTemp,
   });
 
   const acts = actsData.acts;
@@ -238,7 +246,8 @@ async function hierarchicalSplit(
       act.act_title,
       previousActSummary || undefined,
       apiKey,
-      textModel
+      textModel,
+      chunkingTemp
     );
 
     allChunks.push(...chunks);
@@ -257,7 +266,9 @@ async function enrichWithDescriptions(
   totalScenes: number,
   bible: CharacterBible | null,
   apiKey: string,
-  textModel: string
+  textModel: string,
+  descMaxTokens = 1024,
+  descTemp = 0.3
 ): Promise<SceneChunk[]> {
   const validNames = new Set(
     (bible?.characters || []).map((c) => c.name.toLowerCase())
@@ -291,8 +302,8 @@ async function enrichWithDescriptions(
       );
 
       const desc = await geminiTextToJSON<DescriptionResponse>(prompt, apiKey, textModel, {
-        maxOutputTokens: 1024,
-        temperature: 0.3,
+        maxOutputTokens: descMaxTokens,
+        temperature: descTemp,
       });
 
       results[idx].scene_description = desc.scene_description;

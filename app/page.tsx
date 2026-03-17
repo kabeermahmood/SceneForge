@@ -23,6 +23,8 @@ import {
   X,
   SplitSquareVertical,
   ArrowRight,
+  Upload,
+  Download as DownloadIcon,
 } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 import { ART_STYLES, IMAGE_MODELS } from "@/lib/types";
@@ -41,6 +43,9 @@ import StoryboardGrid from "@/components/StoryboardGrid";
 import DownloadPanel from "@/components/DownloadPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProcessingConfig from "@/components/ProcessingConfig";
+import CustomBibleEditor from "@/components/CustomBibleEditor";
+import CustomScenesImport from "@/components/CustomScenesImport";
+import PromptReview from "@/components/PromptReview";
 
 function HomeContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -70,6 +75,12 @@ function HomeContent() {
   const heroContextRef = useRef<{
     scenePrompts: { key: string; prompt: string }[];
     heroImage: { data: string; mimeType: string } | null;
+    currentModel: string;
+    apiKey: string;
+  } | null>(null);
+  const promptsContextRef = useRef<{
+    scenePrompts: { key: string; prompt: string }[];
+    bible: import("@/lib/types").CharacterBible;
     currentModel: string;
     apiKey: string;
   } | null>(null);
@@ -103,6 +114,10 @@ function HomeContent() {
   const appendScenes = useProjectStore((s) => s.appendScenes);
   const updateScene = useProjectStore((s) => s.updateScene);
   const setCurrentSceneIndex = useProjectStore((s) => s.setCurrentSceneIndex);
+  const bibleSource = useProjectStore((s) => s.bible_source);
+  const scenesSource = useProjectStore((s) => s.scenes_source);
+  const advancedParams = useProjectStore((s) => s.advanced_params);
+  const promptTemplates = useProjectStore((s) => s.prompt_templates);
 
   useEffect(() => {
     const check = () => {
@@ -118,13 +133,76 @@ function HomeContent() {
     };
   }, []);
 
-  const canGenerate = script.length >= 100 && hasApiKey;
+  const canGenerate =
+    (scenesSource === "custom" && scenes.length > 0 && (bibleSource === "custom" ? !!characterBible : script.length >= 100) && hasApiKey) ||
+    (script.length >= 100 && hasApiKey);
   const getApiKey = () => localStorage.getItem("gemini_api_key") || "";
 
+  const importProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result as string);
+        if (data._format !== "sceneforge_project_v1") {
+          alert("Invalid project file format");
+          return;
+        }
+        if (data.script) useProjectStore.getState().setScript(data.script);
+        if (data.project) {
+          const p = data.project;
+          if (p.art_style) useProjectStore.getState().setArtStyle(p.art_style);
+          if (p.art_style_custom) useProjectStore.getState().setArtStyleCustom(p.art_style_custom);
+          if (p.aspect_ratio) useProjectStore.getState().setAspectRatio(p.aspect_ratio);
+          if (p.duration_seconds) useProjectStore.getState().setDuration(p.duration_seconds);
+          if (p.seconds_per_scene) useProjectStore.getState().setSecondsPerScene(p.seconds_per_scene);
+          if (p.processing_mode) useProjectStore.getState().setProcessingMode(p.processing_mode);
+          if (p.image_model) useProjectStore.getState().setImageModel(p.image_model);
+          if (p.text_model) useProjectStore.getState().setTextModel(p.text_model);
+          if (p.video_tool) useProjectStore.getState().setVideoTool(p.video_tool);
+        }
+        if (data.character_bible) {
+          useProjectStore.getState().setCharacterBible(data.character_bible);
+          useProjectStore.getState().setBibleSource("custom");
+        }
+        if (data.scenes && Array.isArray(data.scenes) && data.scenes.length > 0) {
+          const imported = data.scenes.map((s: Record<string, unknown>) => ({
+            chunk_index: s.chunk_index || 0,
+            script_text: s.script_text || "",
+            scene_description: s.scene_description || "",
+            scene_emotion: s.scene_emotion || "neutral",
+            characters_present: Array.isArray(s.characters_present) ? s.characters_present : [],
+            generation_prompt: s.generation_prompt || "",
+            image_base64: null,
+            image_mime_type: null,
+            status: "pending" as const,
+            error_message: null,
+            animation_prompt: s.animation_prompt || null,
+            camera_movement: s.camera_movement || null,
+            suggested_transition: s.suggested_transition || null,
+          }));
+          useProjectStore.getState().setScenes(imported);
+          useProjectStore.getState().setScenesSource("custom");
+        }
+        if (data.prompt_templates) useProjectStore.getState().setPromptTemplates(data.prompt_templates);
+        if (data.advanced_params) useProjectStore.getState().setAdvancedParams(data.advanced_params);
+      } catch {
+        alert("Failed to parse project file");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const savedCustomStyles = useProjectStore((s) => s.saved_custom_styles);
   const getArtStylePrompt = useCallback(() => {
     if (artStyle === "custom") return artStyleCustom;
-    return ART_STYLES.find((s) => s.id === artStyle)?.prompt_text || "";
-  }, [artStyle, artStyleCustom]);
+    const builtIn = ART_STYLES.find((s) => s.id === artStyle);
+    if (builtIn) return builtIn.prompt_text;
+    const saved = savedCustomStyles.find((s) => s.id === artStyle);
+    return saved?.prompt_text || "";
+  }, [artStyle, artStyleCustom, savedCustomStyles]);
 
   const loadSampleScript = () => {
     setScript(SAMPLE_SCRIPT);
@@ -170,112 +248,205 @@ function HomeContent() {
     setEta(null);
 
     try {
-      setPipelineStage("generating_bible");
       setErrorMessage(null);
+      let bible = characterBible;
 
-      const bibleRes = await fetch("/api/generate-bible", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script, apiKey, model: textModel }),
-        signal,
-      });
-      if (!bibleRes.ok) {
-        const err = await bibleRes.json();
-        throw new Error(err.message || "Failed to generate Character Bible");
+      if (bibleSource === "custom" && characterBible) {
+        bible = characterBible;
+      } else {
+        setPipelineStage("generating_bible");
+        const bibleRes = await fetch("/api/generate-bible", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script,
+            apiKey,
+            model: textModel,
+            advancedParams,
+            bibleTemplate: promptTemplates.bible || undefined,
+          }),
+          signal,
+        });
+        if (!bibleRes.ok) {
+          const err = await bibleRes.json();
+          throw new Error(err.message || "Failed to generate Character Bible");
+        }
+        bible = await bibleRes.json();
+        setCharacterBible(bible!);
       }
-      const bible = await bibleRes.json();
-      setCharacterBible(bible);
 
       if (cancelledRef.current) {
         setPipelineStage("complete");
         return;
       }
 
-      // ── Auto-split: divide script into parts, use only Part 1 for initial run ──
-      let scriptForChunking = script;
-      const totalDesiredScenes = Math.max(
-        4,
-        Math.min(Math.round(durationSeconds / secondsPerScene), 100)
-      );
-      let chunksCount = totalDesiredScenes;
+      // ── Scene acquisition: custom import or AI chunking ──
+      let newScenes: ReturnType<typeof useProjectStore.getState>["scenes"];
 
-      if (autoSplit) {
-        const parts = splitScript(script);
-        setScriptParts(parts);
-        setCurrentPartIndex(0);
-        scriptForChunking = parts[0];
-        const totalChars = parts.reduce((sum, p) => sum + p.length, 0);
-        const proportion = parts[0].length / totalChars;
-        chunksCount = Math.max(4, Math.round(totalDesiredScenes * proportion));
-        console.log(`[SceneForge] Auto-split: ${parts.length} parts, Part 1 = ${parts[0].length}/${totalChars} chars (${Math.round(proportion * 100)}%) → ${chunksCount} scenes`);
+      if (scenesSource === "custom" && scenes.length > 0) {
+        newScenes = scenes;
+      } else {
+        let scriptForChunking = script;
+        const totalDesiredScenes = Math.max(
+          4,
+          Math.min(Math.round(durationSeconds / secondsPerScene), 100)
+        );
+        let chunksCount = totalDesiredScenes;
+
+        if (autoSplit) {
+          const parts = splitScript(script);
+          setScriptParts(parts);
+          setCurrentPartIndex(0);
+          scriptForChunking = parts[0];
+          const totalChars = parts.reduce((sum, p) => sum + p.length, 0);
+          const proportion = parts[0].length / totalChars;
+          chunksCount = Math.max(4, Math.round(totalDesiredScenes * proportion));
+          console.log(`[SceneForge] Auto-split: ${parts.length} parts, Part 1 = ${parts[0].length}/${totalChars} chars (${Math.round(proportion * 100)}%) → ${chunksCount} scenes`);
+        }
+
+        setPipelineStage("chunking");
+
+        const chunkRes = await fetch("/api/chunk-script", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: scriptForChunking,
+            chunksCount,
+            apiKey,
+            model: textModel,
+            characterBible: bible,
+            advancedParams,
+          }),
+          signal,
+        });
+        if (!chunkRes.ok) {
+          const err = await chunkRes.json();
+          throw new Error(err.message || "Failed to chunk script");
+        }
+        const chunkData = await chunkRes.json();
+        newScenes = chunkData.scenes.map(
+          (s: {
+            chunk_index: number;
+            script_text: string;
+            scene_description: string;
+            scene_emotion: string;
+            characters_present: string[];
+          }) => ({
+            chunk_index: s.chunk_index,
+            script_text: s.script_text,
+            scene_description: s.scene_description,
+            scene_emotion: s.scene_emotion,
+            characters_present: s.characters_present,
+            image_base64: null,
+            image_mime_type: null,
+            status: "pending" as const,
+            generation_prompt: "",
+            error_message: null,
+            animation_prompt: null,
+            camera_movement: null,
+            suggested_transition: null,
+          })
+        );
+        setScenes(newScenes);
       }
-
-      setPipelineStage("chunking");
-
-      const chunkRes = await fetch("/api/chunk-script", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script: scriptForChunking, chunksCount, apiKey, model: textModel, characterBible: bible }),
-        signal,
-      });
-      if (!chunkRes.ok) {
-        const err = await chunkRes.json();
-        throw new Error(err.message || "Failed to chunk script");
-      }
-      const chunkData = await chunkRes.json();
-      const newScenes = chunkData.scenes.map(
-        (s: {
-          chunk_index: number;
-          script_text: string;
-          scene_description: string;
-          scene_emotion: string;
-          characters_present: string[];
-        }) => ({
-          chunk_index: s.chunk_index,
-          script_text: s.script_text,
-          scene_description: s.scene_description,
-          scene_emotion: s.scene_emotion,
-          characters_present: s.characters_present,
-          image_base64: null,
-          image_mime_type: null,
-          status: "pending" as const,
-          generation_prompt: "",
-          error_message: null,
-          animation_prompt: null,
-          camera_movement: null,
-          suggested_transition: null,
-        })
-      );
-      setScenes(newScenes);
 
       if (cancelledRef.current) {
         setPipelineStage("complete");
         return;
       }
 
-      // Step 3: Image Generation
-      setPipelineStage("generating_images");
+      // Step 3: Build prompts and enter review or generation
       const artStylePrompt = getArtStylePrompt();
       const currentModel = imageModel;
 
-      // Build all prompts upfront regardless of mode
       type SceneInput = { chunk_index: number; scene_description: string; scene_emotion: string; characters_present: string[]; script_text: string };
       const scenePrompts = newScenes.map(
         (scene: SceneInput, i: number) => {
           const prompt = buildSceneImagePrompt(
             { ...scene, image_base64: null, image_mime_type: null, status: "pending", generation_prompt: "", error_message: null, animation_prompt: null, camera_movement: null, suggested_transition: null },
             newScenes.length,
-            bible,
+            bible!,
             artStylePrompt,
             aspectRatio
           );
-          updateScene(i, { generation_prompt: prompt, status: "generating" });
+          updateScene(i, { generation_prompt: prompt });
           return {
             key: `scene-${String(scene.chunk_index).padStart(2, "0")}`,
             prompt,
           };
         }
       );
+
+      // ── PROMPT REVIEW: pause for user to review/edit prompts ──
+      promptsContextRef.current = { scenePrompts, bible: bible!, currentModel, apiKey };
+      setPipelineStage("prompt_review");
+      return;
+
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setPipelineStage("complete");
+        return;
+      }
+      const hasAnyScenes = useProjectStore.getState().scenes.some(
+        (s) => s.status === "completed" || s.status === "approved"
+      );
+      if (hasAnyScenes) {
+        console.warn("[SceneForge] Pipeline error, showing partial results:", err);
+        setPipelineStage("complete");
+      } else {
+        setPipelineStage("error");
+        setErrorMessage(
+          err instanceof Error ? err.message : "An unexpected error occurred"
+        );
+      }
+    }
+  }, [
+    script,
+    durationSeconds,
+    secondsPerScene,
+    aspectRatio,
+    processingMode,
+    imageModel,
+    textModel,
+    autoSplit,
+    bibleSource,
+    scenesSource,
+    characterBible,
+    scenes,
+    getArtStylePrompt,
+    setPipelineStage,
+    setErrorMessage,
+    setCharacterBible,
+    setScenes,
+    updateScene,
+    setCurrentSceneIndex,
+    setScriptParts,
+    setCurrentPartIndex,
+  ]);
+
+  // ====== Continue from prompt review → hero frame generation ======
+  const continueFromPromptReview = useCallback(async () => {
+    const ctx = promptsContextRef.current;
+    if (!ctx) return;
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
+
+    const currentScenes = useProjectStore.getState().scenes;
+    const scenePrompts = currentScenes.map((scene, i) => ({
+      key: `scene-${String(scene.chunk_index).padStart(2, "0")}`,
+      prompt: scene.generation_prompt || ctx.scenePrompts[i]?.prompt || "",
+    }));
+
+    const { currentModel, apiKey } = ctx;
+
+    try {
+      setPipelineStage("generating_images");
+      for (let i = 0; i < currentScenes.length; i++) {
+        updateScene(i, { status: "generating" });
+      }
 
       // ── HERO FRAME: Generate Scene 1 first as visual reference ──
       let heroImage: { data: string; mimeType: string } | null = null;
@@ -331,38 +502,10 @@ function HomeContent() {
         setPipelineStage("complete");
         return;
       }
-      const hasAnyScenes = useProjectStore.getState().scenes.some(
-        (s) => s.status === "completed" || s.status === "approved"
-      );
-      if (hasAnyScenes) {
-        console.warn("[SceneForge] Pipeline error, showing partial results:", err);
-        setPipelineStage("complete");
-      } else {
-        setPipelineStage("error");
-        setErrorMessage(
-          err instanceof Error ? err.message : "An unexpected error occurred"
-        );
-      }
+      setPipelineStage("error");
+      setErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred");
     }
-  }, [
-    script,
-    durationSeconds,
-    secondsPerScene,
-    aspectRatio,
-    processingMode,
-    imageModel,
-    textModel,
-    autoSplit,
-    getArtStylePrompt,
-    setPipelineStage,
-    setErrorMessage,
-    setCharacterBible,
-    setScenes,
-    updateScene,
-    setCurrentSceneIndex,
-    setScriptParts,
-    setCurrentPartIndex,
-  ]);
+  }, [aspectRatio, setPipelineStage, setErrorMessage, updateScene, setCurrentSceneIndex]);
 
   // ====== Continue generating remaining scenes after hero approval ======
   const continueAfterHero = useCallback(async () => {
@@ -1406,12 +1549,19 @@ function HomeContent() {
               Paste your script. Get consistent scene illustrations.
             </p>
           </div>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="rounded-lg border border-border bg-surface p-3 text-text-secondary transition-colors hover:border-accent hover:text-accent"
-          >
-            <Settings size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-xs font-medium text-text-secondary transition-colors hover:border-accent hover:text-accent">
+              <DownloadIcon size={16} />
+              Import Project
+              <input type="file" accept=".json" onChange={importProject} className="hidden" />
+            </label>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-lg border border-border bg-surface p-3 text-text-secondary transition-colors hover:border-accent hover:text-accent"
+            >
+              <Settings size={20} />
+            </button>
+          </div>
         </header>
 
         <main className="mx-auto w-full max-w-3xl space-y-8">
@@ -1432,6 +1582,49 @@ function HomeContent() {
           </div>
 
           <StyleSelector />
+
+          {/* Bible & Scene Source Toggles */}
+          <div className="space-y-4">
+            <div className="flex gap-2 rounded-lg bg-background p-1">
+              <button
+                onClick={() => useProjectStore.getState().setBibleSource("ai")}
+                className={`flex-1 rounded-md px-3 py-2 text-xs font-medium transition-all ${
+                  bibleSource === "ai" ? "bg-accent text-background" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                AI-Generated Bible
+              </button>
+              <button
+                onClick={() => useProjectStore.getState().setBibleSource("custom")}
+                className={`flex-1 rounded-md px-3 py-2 text-xs font-medium transition-all ${
+                  bibleSource === "custom" ? "bg-accent text-background" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                Custom Bible
+              </button>
+            </div>
+            <CustomBibleEditor />
+
+            <div className="flex gap-2 rounded-lg bg-background p-1">
+              <button
+                onClick={() => useProjectStore.getState().setScenesSource("ai")}
+                className={`flex-1 rounded-md px-3 py-2 text-xs font-medium transition-all ${
+                  scenesSource === "ai" ? "bg-accent text-background" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                AI Scene Chunking
+              </button>
+              <button
+                onClick={() => useProjectStore.getState().setScenesSource("custom")}
+                className={`flex-1 rounded-md px-3 py-2 text-xs font-medium transition-all ${
+                  scenesSource === "custom" ? "bg-accent text-background" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                Custom Scenes
+              </button>
+            </div>
+            <CustomScenesImport />
+          </div>
 
           <ProcessingConfig />
 
@@ -1464,6 +1657,33 @@ function HomeContent() {
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
         />
+      </div>
+    );
+  }
+
+  // ====== PROMPT REVIEW STATE ======
+  if (pipelineStage === "prompt_review") {
+    return (
+      <div className="flex min-h-screen flex-col pb-12">
+        <header className="flex items-center justify-between py-8">
+          <div>
+            <h1 className="font-heading text-2xl font-bold text-accent">SceneForge</h1>
+            <p className="mt-1 text-xs text-text-secondary">
+              Review and edit prompts before generating images
+            </p>
+          </div>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-lg border border-border bg-surface p-3 text-text-secondary transition-colors hover:border-accent hover:text-accent"
+          >
+            <Settings size={20} />
+          </button>
+        </header>
+        <PromptReview
+          onApprove={continueFromPromptReview}
+          onSkipToComplete={() => setPipelineStage("complete")}
+        />
+        <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     );
   }
@@ -1552,6 +1772,41 @@ function HomeContent() {
                   {heroScene.script_text}
                 </p>
               )}
+
+              {/* Upload Custom Reference Image */}
+              <div className="mt-4 rounded-lg border border-dashed border-accent/30 bg-accent/5 p-3">
+                <label className="flex cursor-pointer items-center justify-center gap-2 text-xs font-medium text-accent transition-colors hover:text-accent-hover">
+                  <Upload size={14} />
+                  Upload Your Own Reference Image
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const base64 = (reader.result as string).split(",")[1];
+                        const mimeType = file.type || "image/png";
+                        updateScene(0, {
+                          image_base64: base64,
+                          image_mime_type: mimeType,
+                          status: "completed",
+                        });
+                        if (heroContextRef.current) {
+                          heroContextRef.current.heroImage = { data: base64, mimeType };
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <p className="mt-1 text-center text-[10px] text-text-secondary/60">
+                  Skip hero generation — use your own character sheet or style reference
+                </p>
+              </div>
             </div>
           </div>
 

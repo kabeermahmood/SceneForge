@@ -115,6 +115,30 @@ export const VIDEO_TOOLS: VideoToolOption[] = [
   { id: "runway", label: "Runway Gen-3", description: "Versatile, good lighting and physics" },
 ];
 
+export interface PromptTemplates {
+  bible?: string;
+  scene_description?: string;
+  image_prompt?: string;
+}
+
+export interface AdvancedParams {
+  bible_temperature: number;
+  bible_max_tokens: number;
+  chunking_temperature: number;
+  description_temperature: number;
+  description_max_tokens: number;
+  max_retries: number;
+}
+
+export const DEFAULT_ADVANCED_PARAMS: AdvancedParams = {
+  bible_temperature: 0.4,
+  bible_max_tokens: 4096,
+  chunking_temperature: 0.3,
+  description_temperature: 0.3,
+  description_max_tokens: 1024,
+  max_retries: 3,
+};
+
 export interface ProjectState {
   script: string;
   duration_seconds: number;
@@ -128,11 +152,14 @@ export interface ProjectState {
   text_model: string;
   video_tool: VideoTool;
   character_bible: CharacterBible | null;
+  bible_source: "ai" | "custom";
+  scenes_source: "ai" | "custom";
   scenes: Scene[];
   pipeline_stage:
     | "idle"
     | "generating_bible"
     | "chunking"
+    | "prompt_review"
     | "generating_images"
     | "hero_review"
     | "complete"
@@ -144,6 +171,9 @@ export interface ProjectState {
   auto_split: boolean;
   script_parts: string[];
   current_part_index: number;
+  prompt_templates: PromptTemplates;
+  advanced_params: AdvancedParams;
+  saved_custom_styles: ArtStyleOption[];
 }
 
 export type ArtStyleOption = {
