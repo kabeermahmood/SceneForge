@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Play, ChevronDown, ChevronUp, Download, SkipForward } from "lucide-react";
+import { Eye, EyeOff, Play, ChevronDown, ChevronUp, Download, SkipForward, FileText } from "lucide-react";
 import { useProjectStore } from "@/store/useProjectStore";
 
 interface PromptReviewProps {
@@ -32,6 +32,20 @@ export default function PromptReview({ onApprove, onSkipToComplete }: PromptRevi
     URL.revokeObjectURL(url);
   };
 
+  const downloadScriptMap = () => {
+    const txt = scenes
+      .map((scene) => `Scene ${scene.chunk_index}\n${scene.script_text}`)
+      .join("\n\n\n");
+
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sceneforge_script_map.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
@@ -45,11 +59,18 @@ export default function PromptReview({ onApprove, onSkipToComplete }: PromptRevi
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={downloadScriptMap}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-accent hover:text-accent"
+          >
+            <FileText size={14} />
+            Script Map (.txt)
+          </button>
+          <button
             onClick={downloadPrompts}
             className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
           >
             <Download size={14} />
-            Download Prompts (.txt)
+            Prompts (.txt)
           </button>
           <button
             onClick={() => setShowAll(!showAll)}
