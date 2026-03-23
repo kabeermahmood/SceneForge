@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import NavBar from "@/components/NavBar";
 
 export const metadata: Metadata = {
   title: "SceneForge",
@@ -34,6 +35,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen antialiased" suppressHydrationWarning>
+        <NavBar />
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8" suppressHydrationWarning>
           {children}
         </div>
