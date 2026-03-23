@@ -47,6 +47,22 @@ const KEY_GROUPS: KeyGroup[] = [
     ],
   },
   {
+    title: "Image Generation",
+    description: "Third-party image generation providers",
+    keys: [
+      {
+        id: "replicate",
+        label: "Replicate",
+        storageKey: "replicate_api_key",
+        description:
+          "Required for Nano Banana Pro thumbnail generation",
+        getKeyUrl: "https://replicate.com/account/api-tokens",
+        getKeyLabel: "Get token",
+        provider: "replicate",
+      },
+    ],
+  },
+  {
     title: "Speech-to-Text",
     description: "Voice transcription providers",
     keys: [

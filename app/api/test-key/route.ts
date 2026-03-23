@@ -23,6 +23,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ valid: true, message: `Connected — ${count > 0 ? "models available" : "no models found"}` });
     }
 
+    if (provider === "replicate") {
+      const res = await fetch(
+        "https://api.replicate.com/v1/models/google/nano-banana-pro",
+        { headers: { Authorization: `Bearer ${apiKey}` } }
+      );
+      if (res.ok) {
+        return NextResponse.json({
+          valid: true,
+          message: "Connected — Nano Banana Pro accessible",
+        });
+      }
+      const err = await res.text();
+      return NextResponse.json({
+        valid: false,
+        error: `Replicate returned ${res.status}: ${err}`,
+      });
+    }
+
     if (provider === "deepgram") {
       const res = await fetch("https://api.deepgram.com/v1/projects", {
         headers: { Authorization: `Token ${apiKey}` },
