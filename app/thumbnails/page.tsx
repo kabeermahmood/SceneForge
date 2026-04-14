@@ -196,6 +196,7 @@ export default function ThumbnailsPage() {
         negativePrompt={negativePrompt}
         onNegativeChange={setNegativePrompt}
         disabled={loading}
+        geminiKey={geminiKey}
       />
 
       {/* Aspect ratio */}

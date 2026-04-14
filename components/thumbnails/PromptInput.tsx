@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, ChevronDown, Ban } from "lucide-react";
+import { X, ChevronDown, Ban, Wand2, Loader2 } from "lucide-react";
 
 interface Props {
   value: string;
@@ -9,6 +9,7 @@ interface Props {
   negativePrompt: string;
   onNegativeChange: (value: string) => void;
   disabled?: boolean;
+  geminiKey?: string;
 }
 
 export default function PromptInput({
@@ -17,8 +18,41 @@ export default function PromptInput({
   negativePrompt,
   onNegativeChange,
   disabled,
+  geminiKey,
 }: Props) {
   const [showNegative, setShowNegative] = useState(negativePrompt.length > 0);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+
+  const canEnhance = value.trim().length > 0 && !disabled && !enhancing;
+
+  async function handleEnhance() {
+    if (!canEnhance) return;
+    setEnhancing(true);
+    setEnhanceError(null);
+
+    try {
+      const res = await fetch("/api/enhance-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: value.trim(),
+          apiKey: geminiKey || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Enhancement failed");
+
+      onChange(data.enhanced);
+    } catch (err: unknown) {
+      setEnhanceError(
+        err instanceof Error ? err.message : "Enhancement failed"
+      );
+    } finally {
+      setEnhancing(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -29,29 +63,54 @@ export default function PromptInput({
             Image Prompt{" "}
             <span className="text-error text-xs ml-1">REQUIRED</span>
           </label>
-          {value.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onChange("")}
-              disabled={disabled}
-              className="flex items-center gap-1 text-xs text-text-secondary hover:text-error transition disabled:opacity-40"
-            >
-              <X size={12} />
-              Clear
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {value.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange("")}
+                disabled={disabled}
+                className="flex items-center gap-1 text-xs text-text-secondary hover:text-error transition disabled:opacity-40"
+              >
+                <X size={12} />
+                Clear
+              </button>
+            )}
+          </div>
         </div>
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
+          disabled={disabled || enhancing}
           rows={5}
           placeholder="Describe the image you want to generate in detail..."
           className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/50 resize-y disabled:opacity-50 font-mono"
         />
-        <p className="text-xs text-text-secondary text-right">
-          {value.length.toLocaleString()} characters
-        </p>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleEnhance}
+            disabled={!canEnhance}
+            className="flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent transition-all hover:bg-accent/15 hover:border-accent/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent/5 disabled:hover:border-accent/30"
+          >
+            {enhancing ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                Enhancing…
+              </>
+            ) : (
+              <>
+                <Wand2 size={12} />
+                Enhance with AI
+              </>
+            )}
+          </button>
+          <p className="text-xs text-text-secondary">
+            {value.length.toLocaleString()} characters
+          </p>
+        </div>
+        {enhanceError && (
+          <p className="text-xs text-error animate-fade-in">{enhanceError}</p>
+        )}
       </div>
 
       {/* Negative prompt toggle + field */}
