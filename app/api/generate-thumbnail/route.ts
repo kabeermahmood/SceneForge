@@ -8,6 +8,7 @@ type Provider = "replicate" | "google";
 
 interface ThumbnailRequest {
   prompt: string;
+  negativePrompt?: string;
   provider: Provider;
   aspectRatio: string;
   referenceImages?: { data: string; mimeType: string }[];
@@ -25,6 +26,10 @@ async function generateWithReplicate(body: ThumbnailRequest) {
     aspect_ratio: body.aspectRatio || "16:9",
     output_format: body.outputFormat || "png",
   };
+
+  if (body.negativePrompt) {
+    input.negative_prompt = body.negativePrompt;
+  }
 
   if (body.resolution) {
     input.resolution = body.resolution;
@@ -72,6 +77,10 @@ async function generateWithGoogle(body: ThumbnailRequest) {
   const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] =
     [];
 
+  const negativeClause = body.negativePrompt
+    ? `\n\nIMPORTANT — Do NOT include any of the following: ${body.negativePrompt}`
+    : "";
+
   if (body.referenceImages && body.referenceImages.length > 0) {
     for (const ref of body.referenceImages) {
       parts.push({
@@ -82,11 +91,11 @@ async function generateWithGoogle(body: ThumbnailRequest) {
       });
     }
     parts.push({
-      text: `[REFERENCE IMAGES ABOVE]: Use these as style and composition guidance. Generate a SINGLE image that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames.\n\n${body.prompt}`,
+      text: `[REFERENCE IMAGES ABOVE]: Use these as style and composition guidance. Generate a SINGLE image that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames.\n\n${body.prompt}${negativeClause}`,
     });
   } else {
     parts.push({
-      text: `Generate a SINGLE image that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames.\n\n${body.prompt}`,
+      text: `Generate a SINGLE image that fills the ENTIRE canvas edge-to-edge. NO borders, NO panels, NO frames.\n\n${body.prompt}${negativeClause}`,
     });
   }
 

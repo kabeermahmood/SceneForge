@@ -21,6 +21,7 @@ const REPLICATE_KEY = "replicate_api_key";
 
 export default function ThumbnailsPage() {
   const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
   const [provider, setProvider] = useState<Provider>("replicate");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [referenceImages, setReferenceImages] = useState<RefImage[]>([]);
@@ -61,6 +62,10 @@ export default function ThumbnailsPage() {
         }));
       }
 
+      if (negativePrompt.trim()) {
+        body.negativePrompt = negativePrompt.trim();
+      }
+
       if (provider === "replicate") {
         body.resolution = resolution;
         body.outputFormat = outputFormat;
@@ -99,6 +104,7 @@ export default function ThumbnailsPage() {
   }, [
     canSubmit,
     prompt,
+    negativePrompt,
     provider,
     aspectRatio,
     activeKey,
@@ -156,7 +162,13 @@ export default function ThumbnailsPage() {
       />
 
       {/* Prompt */}
-      <PromptInput value={prompt} onChange={setPrompt} disabled={loading} />
+      <PromptInput
+        value={prompt}
+        onChange={setPrompt}
+        negativePrompt={negativePrompt}
+        onNegativeChange={setNegativePrompt}
+        disabled={loading}
+      />
 
       {/* Aspect ratio */}
       <AspectRatioSelector
