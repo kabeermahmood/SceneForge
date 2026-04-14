@@ -262,6 +262,10 @@ export default function ThumbnailsPage() {
       <GenerationGallery
         generations={generations}
         onClear={() => setGenerations([])}
+        onReusePrompt={(p) => {
+          setPrompt(p);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
       />
     </div>
   );
