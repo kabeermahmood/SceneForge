@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Maximize2,
   RotateCcw,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 
 export interface Generation {
@@ -22,6 +24,8 @@ export interface Generation {
   imageBase64?: string;
   mimeType?: string;
   timestamp: number;
+  status?: "pending" | "complete" | "error";
+  error?: string;
 }
 
 interface Props {
@@ -220,69 +224,107 @@ export default function GenerationGallery({
           )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {generations.map((gen, i) => (
-            <div
-              key={gen.id}
-              className="group rounded-xl border border-border bg-surface overflow-hidden transition hover:border-accent/40"
-            >
+          {generations.map((gen, i) => {
+            const isPending = gen.status === "pending";
+            const isError = gen.status === "error";
+            const isComplete = !isPending && !isError;
+
+            return (
               <div
-                className="relative aspect-video bg-background cursor-pointer"
-                onClick={() => setLightboxIndex(i)}
+                key={gen.id}
+                className={`group rounded-xl border bg-surface overflow-hidden transition ${
+                  isPending
+                    ? "border-accent/30 animate-pulse"
+                    : isError
+                      ? "border-error/30"
+                      : "border-border hover:border-accent/40"
+                }`}
               >
-                <img
-                  src={getImageSrc(gen)}
-                  alt={gen.prompt.slice(0, 60)}
-                  className="h-full w-full object-contain"
-                  loading="lazy"
-                />
-                <div className="absolute inset-0 flex items-center justify-center bg-background/0 group-hover:bg-background/30 transition">
-                  <Maximize2
-                    size={20}
-                    className="text-text-primary opacity-0 group-hover:opacity-80 transition"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadImage(gen);
-                  }}
-                  className="absolute top-2 right-2 rounded-lg bg-background/80 p-2 text-text-secondary opacity-0 group-hover:opacity-100 transition hover:text-accent hover:bg-background"
-                  title="Download"
-                >
-                  <Download size={14} />
-                </button>
-              </div>
-              <div className="px-3 py-2.5 space-y-1.5">
-                <p className="text-xs text-text-primary line-clamp-2">
-                  {gen.prompt}
-                </p>
-                <div className="flex items-center justify-between text-[10px] text-text-secondary">
-                  <span className="flex items-center gap-1">
-                    {gen.provider === "replicate" ? (
-                      <Cloud size={10} />
-                    ) : (
-                      <Monitor size={10} />
-                    )}
-                    {gen.provider === "replicate"
-                      ? "Nano Banana Pro"
-                      : "Google Direct"}
-                  </span>
-                  <span>{new Date(gen.timestamp).toLocaleTimeString()}</span>
-                </div>
-                {onReusePrompt && (
-                  <button
-                    type="button"
-                    onClick={() => onReusePrompt(gen.prompt)}
-                    className="flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-accent transition"
-                  >
-                    <RotateCcw size={10} />
-                    Reuse prompt
-                  </button>
+                {/* Pending shimmer */}
+                {isPending && (
+                  <div className="relative aspect-video bg-background flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 size={24} className="text-accent animate-spin" />
+                      <span className="text-xs text-text-secondary">Generating…</span>
+                    </div>
+                  </div>
                 )}
+
+                {/* Error state */}
+                {isError && (
+                  <div className="relative aspect-video bg-error/5 flex items-center justify-center px-4">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <AlertCircle size={24} className="text-error" />
+                      <span className="text-xs text-error line-clamp-3">
+                        {gen.error || "Generation failed"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Completed image */}
+                {isComplete && (
+                  <div
+                    className="relative aspect-video bg-background cursor-pointer"
+                    onClick={() => setLightboxIndex(i)}
+                  >
+                    <img
+                      src={getImageSrc(gen)}
+                      alt={gen.prompt.slice(0, 60)}
+                      className="h-full w-full object-contain"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-background/0 group-hover:bg-background/30 transition">
+                      <Maximize2
+                        size={20}
+                        className="text-text-primary opacity-0 group-hover:opacity-80 transition"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadImage(gen);
+                      }}
+                      className="absolute top-2 right-2 rounded-lg bg-background/80 p-2 text-text-secondary opacity-0 group-hover:opacity-100 transition hover:text-accent hover:bg-background"
+                      title="Download"
+                    >
+                      <Download size={14} />
+                    </button>
+                  </div>
+                )}
+
+                <div className="px-3 py-2.5 space-y-1.5">
+                  <p className="text-xs text-text-primary line-clamp-2">
+                    {gen.prompt}
+                  </p>
+                  <div className="flex items-center justify-between text-[10px] text-text-secondary">
+                    <span className="flex items-center gap-1">
+                      {gen.provider === "replicate" ? (
+                        <Cloud size={10} />
+                      ) : (
+                        <Monitor size={10} />
+                      )}
+                      {gen.provider === "replicate"
+                        ? "Nano Banana Pro"
+                        : "Google Direct"}
+                    </span>
+                    <span>{new Date(gen.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  {isComplete && onReusePrompt && (
+                    <button
+                      type="button"
+                      onClick={() => onReusePrompt(gen.prompt)}
+                      className="flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-accent transition"
+                    >
+                      <RotateCcw size={10} />
+                      Reuse prompt
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

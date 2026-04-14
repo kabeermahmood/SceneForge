@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Sparkles, Loader2, AlertCircle, KeyRound, Paintbrush } from "lucide-react";
+import { Sparkles, Loader2, KeyRound, Paintbrush } from "lucide-react";
 import Link from "next/link";
 import PromptInput from "@/components/thumbnails/PromptInput";
 import ProviderToggle, { type Provider } from "@/components/thumbnails/ProviderToggle";
@@ -30,29 +30,28 @@ export default function ThumbnailsPage() {
   const [outputFormat, setOutputFormat] = useState("png");
   const [model, setModel] = useState("gemini-2.5-flash-image");
   const [useGoogleSearch, setUseGoogleSearch] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [generations, setGenerations] = useState<Generation[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = localStorage.getItem("thumbnail_gallery");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [activeJobs, setActiveJobs] = useState(0);
+  const [generations, setGenerations] = useState<Generation[]>([]);
   const [geminiKey, setGeminiKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
 
   useEffect(() => {
     setGeminiKey(localStorage.getItem(GEMINI_KEY) || "");
     setReplicateKey(localStorage.getItem(REPLICATE_KEY) || "");
+    try {
+      const saved = localStorage.getItem("thumbnail_gallery");
+      if (saved) setGenerations(JSON.parse(saved));
+    } catch {
+      // corrupted data — start fresh
+    }
   }, []);
 
   useEffect(() => {
     try {
       const MAX_STORED = 50;
-      const toStore = generations.slice(0, MAX_STORED);
+      const toStore = generations
+        .filter((g) => g.status !== "pending")
+        .slice(0, MAX_STORED);
       localStorage.setItem("thumbnail_gallery", JSON.stringify(toStore));
     } catch {
       // localStorage full — silently skip
@@ -60,12 +59,22 @@ export default function ThumbnailsPage() {
   }, [generations]);
 
   const activeKey = provider === "replicate" ? replicateKey : geminiKey;
-  const canSubmit = prompt.trim().length > 0 && activeKey.trim().length > 0 && !loading;
+  const canSubmit = prompt.trim().length > 0 && activeKey.trim().length > 0;
 
   const handleGenerate = useCallback(async () => {
     if (!canSubmit) return;
-    setLoading(true);
-    setError(null);
+
+    const jobId = crypto.randomUUID();
+    const pendingGen: Generation = {
+      id: jobId,
+      prompt: prompt.trim(),
+      provider,
+      timestamp: Date.now(),
+      status: "pending",
+    };
+
+    setGenerations((prev) => [pendingGen, ...prev]);
+    setActiveJobs((n) => n + 1);
 
     try {
       const body: Record<string, unknown> = {
@@ -106,21 +115,30 @@ export default function ThumbnailsPage() {
         throw new Error(data.error || `Generation failed (${res.status})`);
       }
 
-      const newGen: Generation = {
-        id: crypto.randomUUID(),
-        prompt: prompt.trim(),
-        provider,
-        imageUrl: data.imageUrl,
-        imageBase64: data.imageBase64,
-        mimeType: data.mimeType,
-        timestamp: Date.now(),
-      };
-
-      setGenerations((prev) => [newGen, ...prev]);
+      setGenerations((prev) =>
+        prev.map((g) =>
+          g.id === jobId
+            ? {
+                ...g,
+                imageUrl: data.imageUrl,
+                imageBase64: data.imageBase64,
+                mimeType: data.mimeType,
+                status: "complete" as const,
+              }
+            : g
+        )
+      );
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setGenerations((prev) =>
+        prev.map((g) =>
+          g.id === jobId
+            ? { ...g, status: "error" as const, error: message }
+            : g
+        )
+      );
     } finally {
-      setLoading(false);
+      setActiveJobs((n) => Math.max(0, n - 1));
     }
   }, [
     canSubmit,
@@ -180,7 +198,7 @@ export default function ThumbnailsPage() {
       <ProviderToggle
         value={provider}
         onChange={setProvider}
-        disabled={loading}
+        disabled={false}
       />
 
       {/* Prompt templates */}
@@ -189,7 +207,7 @@ export default function ThumbnailsPage() {
           setPrompt(p);
           setNegativePrompt(np);
         }}
-        disabled={loading}
+        disabled={false}
       />
 
       {/* Prompt */}
@@ -198,7 +216,7 @@ export default function ThumbnailsPage() {
         onChange={setPrompt}
         negativePrompt={negativePrompt}
         onNegativeChange={setNegativePrompt}
-        disabled={loading}
+        disabled={false}
         geminiKey={geminiKey}
       />
 
@@ -206,14 +224,14 @@ export default function ThumbnailsPage() {
       <AspectRatioSelector
         value={aspectRatio}
         onChange={setAspectRatio}
-        disabled={loading}
+        disabled={false}
       />
 
       {/* Reference images */}
       <ReferenceImageUpload
         images={referenceImages}
         onChange={setReferenceImages}
-        disabled={loading}
+        disabled={false}
       />
 
       {/* Advanced settings */}
@@ -227,7 +245,7 @@ export default function ThumbnailsPage() {
         onModelChange={setModel}
         useGoogleSearch={useGoogleSearch}
         onUseGoogleSearchChange={setUseGoogleSearch}
-        disabled={loading}
+        disabled={false}
       />
 
       {/* Generate button */}
@@ -236,33 +254,15 @@ export default function ThumbnailsPage() {
         onClick={handleGenerate}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-6 py-4 text-sm font-bold text-background transition-all hover:bg-accent-hover hover:scale-[1.01] hover:shadow-lg hover:shadow-accent/20 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none"
       >
-        {loading ? (
-          <>
-            <Loader2 size={18} className="animate-spin" />
-            Generating…
-          </>
-        ) : (
-          <>
-            <Sparkles size={18} />
-            Generate Image
-          </>
+        <Sparkles size={18} />
+        Generate Image
+        {activeJobs > 0 && (
+          <span className="flex items-center gap-1.5 ml-1 rounded-full bg-background/20 px-2.5 py-0.5 text-xs">
+            <Loader2 size={12} className="animate-spin" />
+            {activeJobs} in progress
+          </span>
         )}
       </button>
-
-      {/* Error */}
-      {error && (
-        <div className="flex items-start gap-3 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error animate-fade-in">
-          <AlertCircle size={18} className="mt-0.5 shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
-
-      {/* Loading skeleton */}
-      {loading && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          <div className="aspect-video animate-shimmer" />
-        </div>
-      )}
 
       {/* Gallery */}
       <GenerationGallery
