@@ -31,7 +31,15 @@ export default function ThumbnailsPage() {
   const [model, setModel] = useState("gemini-2.5-flash-image");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generations, setGenerations] = useState<Generation[]>([]);
+  const [generations, setGenerations] = useState<Generation[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem("thumbnail_gallery");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [geminiKey, setGeminiKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
 
@@ -39,6 +47,16 @@ export default function ThumbnailsPage() {
     setGeminiKey(localStorage.getItem(GEMINI_KEY) || "");
     setReplicateKey(localStorage.getItem(REPLICATE_KEY) || "");
   }, []);
+
+  useEffect(() => {
+    try {
+      const MAX_STORED = 50;
+      const toStore = generations.slice(0, MAX_STORED);
+      localStorage.setItem("thumbnail_gallery", JSON.stringify(toStore));
+    } catch {
+      // localStorage full — silently skip
+    }
+  }, [generations]);
 
   const activeKey = provider === "replicate" ? replicateKey : geminiKey;
   const canSubmit = prompt.trim().length > 0 && activeKey.trim().length > 0 && !loading;
@@ -241,7 +259,10 @@ export default function ThumbnailsPage() {
       )}
 
       {/* Gallery */}
-      <GenerationGallery generations={generations} />
+      <GenerationGallery
+        generations={generations}
+        onClear={() => setGenerations([])}
+      />
     </div>
   );
 }

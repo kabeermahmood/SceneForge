@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Clock, Cloud, Monitor } from "lucide-react";
+import { Download, Clock, Cloud, Monitor, Trash2 } from "lucide-react";
 
 export interface Generation {
   id: string;
@@ -14,6 +14,7 @@ export interface Generation {
 
 interface Props {
   generations: Generation[];
+  onClear?: () => void;
 }
 
 function getImageSrc(gen: Generation): string {
@@ -31,7 +32,7 @@ function downloadImage(gen: Generation) {
   a.click();
 }
 
-export default function GenerationGallery({ generations }: Props) {
+export default function GenerationGallery({ generations, onClear }: Props) {
   if (generations.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-surface px-6 py-16 text-center">
@@ -50,9 +51,21 @@ export default function GenerationGallery({ generations }: Props) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-text-primary">
-        Generated Images ({generations.length})
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text-primary">
+          Generated Images ({generations.length})
+        </h3>
+        {onClear && generations.length > 0 && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-error transition"
+          >
+            <Trash2 size={12} />
+            Clear All
+          </button>
+        )}
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {generations.map((gen) => (
           <div
