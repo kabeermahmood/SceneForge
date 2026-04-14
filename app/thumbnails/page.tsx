@@ -29,6 +29,7 @@ export default function ThumbnailsPage() {
   const [resolution, setResolution] = useState("2K");
   const [outputFormat, setOutputFormat] = useState("png");
   const [model, setModel] = useState("gemini-2.5-flash-image");
+  const [useGoogleSearch, setUseGoogleSearch] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generations, setGenerations] = useState<Generation[]>(() => {
@@ -90,6 +91,7 @@ export default function ThumbnailsPage() {
         body.outputFormat = outputFormat;
       } else {
         body.model = model;
+        if (useGoogleSearch) body.useGoogleSearch = true;
       }
 
       const res = await fetch("/api/generate-thumbnail", {
@@ -131,6 +133,7 @@ export default function ThumbnailsPage() {
     resolution,
     outputFormat,
     model,
+    useGoogleSearch,
   ]);
 
   useEffect(() => {
@@ -222,6 +225,8 @@ export default function ThumbnailsPage() {
         onOutputFormatChange={setOutputFormat}
         model={model}
         onModelChange={setModel}
+        useGoogleSearch={useGoogleSearch}
+        onUseGoogleSearchChange={setUseGoogleSearch}
         disabled={loading}
       />
 

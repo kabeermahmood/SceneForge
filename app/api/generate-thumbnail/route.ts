@@ -16,6 +16,7 @@ interface ThumbnailRequest {
   resolution?: string;
   outputFormat?: string;
   model?: string;
+  useGoogleSearch?: boolean;
 }
 
 async function generateWithReplicate(body: ThumbnailRequest) {
@@ -73,6 +74,7 @@ async function generateWithGoogle(body: ThumbnailRequest) {
   const genAI = getGeminiClient(body.apiKey);
   const selectedModel = body.model || "gemini-2.5-flash-image";
   const imageAspectRatio = body.aspectRatio || "16:9";
+  const useSearch = body.useGoogleSearch ?? false;
 
   const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] =
     [];
@@ -100,16 +102,23 @@ async function generateWithGoogle(body: ThumbnailRequest) {
   }
 
   console.log(
-    `[thumbnail] Google — model: ${selectedModel}, prompt: "${body.prompt.slice(0, 80)}...", ratio: ${imageAspectRatio}, refs: ${body.referenceImages?.length ?? 0}`
+    `[thumbnail] Google — model: ${selectedModel}, prompt: "${body.prompt.slice(0, 80)}…", ratio: ${imageAspectRatio}, refs: ${body.referenceImages?.length ?? 0}, grounding: ${useSearch}`
   );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const config: Record<string, any> = {
+    responseModalities: ["image", "text"],
+    imageConfig: { aspectRatio: imageAspectRatio },
+  };
+
+  if (useSearch) {
+    config.tools = [{ googleSearch: {} }];
+  }
 
   const response = await genAI.models.generateContent({
     model: selectedModel,
     contents: [{ role: "user", parts }],
-    config: {
-      responseModalities: ["image", "text"],
-      imageConfig: { aspectRatio: imageAspectRatio },
-    },
+    config,
   });
 
   let imageBase64: string | null = null;
