@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize2,
+  RotateCcw,
 } from "lucide-react";
 
 export interface Generation {
@@ -252,7 +253,7 @@ export default function GenerationGallery({
                   <Download size={14} />
                 </button>
               </div>
-              <div className="px-3 py-2.5 space-y-1">
+              <div className="px-3 py-2.5 space-y-1.5">
                 <p className="text-xs text-text-primary line-clamp-2">
                   {gen.prompt}
                 </p>
@@ -269,6 +270,16 @@ export default function GenerationGallery({
                   </span>
                   <span>{new Date(gen.timestamp).toLocaleTimeString()}</span>
                 </div>
+                {onReusePrompt && (
+                  <button
+                    type="button"
+                    onClick={() => onReusePrompt(gen.prompt)}
+                    className="flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-accent transition"
+                  >
+                    <RotateCcw size={10} />
+                    Reuse prompt
+                  </button>
+                )}
               </div>
             </div>
           ))}
