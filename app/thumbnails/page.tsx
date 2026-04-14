@@ -11,6 +11,7 @@ import AspectRatioSelector, {
 import ReferenceImageUpload, {
   type RefImage,
 } from "@/components/thumbnails/ReferenceImageUpload";
+import PromptTemplates from "@/components/thumbnails/PromptTemplates";
 import AdvancedSettings from "@/components/thumbnails/AdvancedSettings";
 import GenerationGallery, {
   type Generation,
@@ -158,6 +159,15 @@ export default function ThumbnailsPage() {
       <ProviderToggle
         value={provider}
         onChange={setProvider}
+        disabled={loading}
+      />
+
+      {/* Prompt templates */}
+      <PromptTemplates
+        onApply={(p, np) => {
+          setPrompt(p);
+          setNegativePrompt(np);
+        }}
         disabled={loading}
       />
 
