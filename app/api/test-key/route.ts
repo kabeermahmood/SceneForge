@@ -52,6 +52,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ valid: false, error: `Deepgram returned ${res.status}: ${err}` });
     }
 
+    if (provider === "elevenlabs") {
+      const res = await fetch("https://api.elevenlabs.io/v1/user", {
+        headers: { "xi-api-key": apiKey },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { subscription?: { tier?: string } };
+        const tier = data?.subscription?.tier;
+        return NextResponse.json({
+          valid: true,
+          message: tier
+            ? `Connected — ${tier} plan`
+            : "Connected — key is valid",
+        });
+      }
+      const err = await res.text();
+      return NextResponse.json({
+        valid: false,
+        error: `ElevenLabs returned ${res.status}: ${err}`,
+      });
+    }
+
     return NextResponse.json(
       { valid: false, error: `Unknown provider: ${provider}` },
       { status: 400 }

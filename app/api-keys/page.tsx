@@ -77,6 +77,22 @@ const KEY_GROUPS: KeyGroup[] = [
       },
     ],
   },
+  {
+    title: "Voice Synthesis",
+    description: "Text-to-speech voiceover providers",
+    keys: [
+      {
+        id: "elevenlabs",
+        label: "ElevenLabs",
+        storageKey: "elevenlabs_api_key",
+        description:
+          "Powers Voice Studio TTS generation, voice library, and credit balance",
+        getKeyUrl: "https://elevenlabs.io/app/settings/api-keys",
+        getKeyLabel: "Get key",
+        provider: "elevenlabs",
+      },
+    ],
+  },
 ];
 
 type TestStatus = "idle" | "testing" | "success" | "error";
