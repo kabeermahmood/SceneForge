@@ -119,15 +119,11 @@ export default function PronunciationDictPanel({
             <div className="space-y-1">
               <p>
                 Replace tricky words with phonetic spellings the model will read
-                more naturally. Example:{" "}
-                <span className="font-mono text-text-primary">
-                  Mujahid
-                </span>{" "}
+                more naturally. Example: the front of a ship,{" "}
+                <span className="font-mono text-text-primary">bow</span>{" "}
                 <span className="text-text-secondary">→</span>{" "}
-                <span className="font-mono text-text-primary">
-                  Moo-jah-heed
-                </span>
-                .
+                <span className="font-mono text-text-primary">bau</span>{" "}
+                (rhymes with &quot;wow&quot;, not &quot;low&quot;).
               </p>
               <p className="text-[11px]">
                 Dictionaries don&apos;t apply to the Eleven v3 (alpha) model.
@@ -156,7 +152,7 @@ export default function PronunciationDictPanel({
                     onChange={(e) =>
                       updateRow(row.id, { from: e.target.value })
                     }
-                    placeholder="Mujahid"
+                    placeholder="bow"
                     maxLength={MAX_FROM_LENGTH + 10}
                     className={`rounded-lg border bg-background px-3 py-2 text-sm font-mono ${
                       fromTooLong
@@ -170,7 +166,7 @@ export default function PronunciationDictPanel({
                     onChange={(e) =>
                       updateRow(row.id, { to: e.target.value })
                     }
-                    placeholder="Moo-jah-heed"
+                    placeholder="bau"
                     maxLength={MAX_TO_LENGTH + 10}
                     className={`rounded-lg border bg-background px-3 py-2 text-sm font-mono ${
                       toTooLong
