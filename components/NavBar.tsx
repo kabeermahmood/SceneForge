@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ImageIcon, Mic, KeyRound, Paintbrush } from "lucide-react";
+import { ImageIcon, Mic, KeyRound, Paintbrush, AudioLines } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", label: "Image Generation", icon: ImageIcon },
   { href: "/thumbnails", label: "Thumbnails", icon: Paintbrush },
+  { href: "/voice-studio", label: "Voice Studio", icon: AudioLines },
   { href: "/pronunciation", label: "Pronunciation Checker", icon: Mic },
   { href: "/api-keys", label: "API Keys", icon: KeyRound },
 ];
