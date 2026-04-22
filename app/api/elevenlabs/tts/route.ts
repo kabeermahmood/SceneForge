@@ -12,6 +12,10 @@ interface TTSBody {
     style?: number;
     use_speaker_boost?: boolean;
   };
+  dictionaryLocator?: {
+    id?: string;
+    version_id?: string;
+  } | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -54,6 +58,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const upstreamPayload: Record<string, unknown> = {
+    text,
+    model_id: modelId,
+    voice_settings: {
+      stability: body.settings?.stability ?? 0.5,
+      similarity_boost: body.settings?.similarity_boost ?? 0.75,
+      style: body.settings?.style ?? 0,
+      use_speaker_boost: body.settings?.use_speaker_boost ?? true,
+    },
+  };
+
+  const locator = body.dictionaryLocator;
+  if (locator?.id && locator?.version_id) {
+    upstreamPayload.pronunciation_dictionary_locators = [
+      {
+        pronunciation_dictionary_id: locator.id,
+        version_id: locator.version_id,
+      },
+    ];
+  }
+
   try {
     const upstream = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
@@ -66,16 +91,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
           Accept: "audio/mpeg",
         },
-        body: JSON.stringify({
-          text,
-          model_id: modelId,
-          voice_settings: {
-            stability: body.settings?.stability ?? 0.5,
-            similarity_boost: body.settings?.similarity_boost ?? 0.75,
-            style: body.settings?.style ?? 0,
-            use_speaker_boost: body.settings?.use_speaker_boost ?? true,
-          },
-        }),
+        body: JSON.stringify(upstreamPayload),
       }
     );
 

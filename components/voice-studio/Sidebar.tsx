@@ -20,6 +20,7 @@ import {
   type Voice,
   type VoiceSettings,
 } from "@/lib/elevenlabs";
+import PronunciationDictSection from "./PronunciationDictSection";
 
 interface SidebarProps {
   hasApiKey: boolean;
@@ -34,6 +35,10 @@ interface SidebarProps {
   settings: VoiceSettings;
   onSettingsChange: (next: VoiceSettings) => void;
   disabled: boolean;
+  dictEnabled: boolean;
+  onDictToggle: (next: boolean) => void;
+  dictRuleCount: number;
+  onOpenDict: () => void;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -50,6 +55,10 @@ export default function Sidebar(props: SidebarProps) {
     settings,
     onSettingsChange,
     disabled,
+    dictEnabled,
+    onDictToggle,
+    dictRuleCount,
+    onOpenDict,
   } = props;
 
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
@@ -333,6 +342,16 @@ export default function Sidebar(props: SidebarProps) {
           </div>
         )}
       </section>
+
+      {/* Pronunciation dictionary */}
+      <PronunciationDictSection
+        enabled={dictEnabled}
+        onToggle={onDictToggle}
+        ruleCount={dictRuleCount}
+        onManage={onOpenDict}
+        disabled={disabled}
+        v3Warning={selectedModelId === "eleven_v3"}
+      />
     </aside>
   );
 }

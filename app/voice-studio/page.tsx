@@ -13,6 +13,7 @@ import Sidebar from "@/components/voice-studio/Sidebar";
 import ScriptEditor from "@/components/voice-studio/ScriptEditor";
 import CreditsBadge from "@/components/voice-studio/CreditsBadge";
 import HistoryList from "@/components/voice-studio/HistoryList";
+import PronunciationDictPanel from "@/components/voice-studio/PronunciationDictPanel";
 import {
   ELEVENLABS_KEY_STORAGE,
   SELECTED_VOICE_STORAGE,
@@ -25,6 +26,17 @@ import {
   type VoiceSettings,
 } from "@/lib/elevenlabs";
 import { addHistoryEntry } from "@/lib/voiceHistory";
+import {
+  hashRules,
+  loadEnabled,
+  loadRules,
+  loadSynced,
+  saveEnabled,
+  saveRules,
+  saveSynced,
+  type PronunciationRule,
+  type SyncedDictState,
+} from "@/lib/pronunciationDict";
 
 export default function VoiceStudioPage() {
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -47,6 +59,11 @@ export default function VoiceStudioPage() {
   const [historyTick, setHistoryTick] = useState(0);
   const [creditsTick, setCreditsTick] = useState(0);
 
+  const [dictRules, setDictRules] = useState<PronunciationRule[]>([]);
+  const [dictEnabled, setDictEnabled] = useState(false);
+  const [dictSynced, setDictSynced] = useState<SyncedDictState | null>(null);
+  const [dictPanelOpen, setDictPanelOpen] = useState(false);
+
   useEffect(() => {
     const key = localStorage.getItem(ELEVENLABS_KEY_STORAGE)?.trim() || "";
     setHasApiKey(key.length > 0);
@@ -66,6 +83,10 @@ export default function VoiceStudioPage() {
         // ignore corrupt settings
       }
     }
+
+    setDictRules(loadRules());
+    setDictEnabled(loadEnabled());
+    setDictSynced(loadSynced());
   }, []);
 
   useEffect(() => {
@@ -130,6 +151,67 @@ export default function VoiceStudioPage() {
     localStorage.setItem(SELECTED_MODEL_STORAGE, id);
   };
 
+  const handleDictToggle = (next: boolean) => {
+    setDictEnabled(next);
+    saveEnabled(next);
+  };
+
+  const handleDictSave = (next: PronunciationRule[]) => {
+    setDictRules(next);
+    saveRules(next);
+    if (next.length === 0) {
+      setDictSynced(null);
+      saveSynced(null);
+    }
+  };
+
+  const ensureDictionary = useCallback(async (): Promise<{
+    id: string;
+    version_id: string;
+  } | null> => {
+    if (!dictEnabled) return null;
+    if (dictRules.length === 0) return null;
+    if (selectedModelId === "eleven_v3") return null;
+
+    const currentHash = hashRules(dictRules);
+    if (
+      dictSynced &&
+      dictSynced.hash === currentHash &&
+      dictSynced.id &&
+      dictSynced.version_id
+    ) {
+      return { id: dictSynced.id, version_id: dictSynced.version_id };
+    }
+
+    const key = localStorage.getItem(ELEVENLABS_KEY_STORAGE)?.trim();
+    if (!key) return null;
+
+    const res = await fetch("/api/elevenlabs/dictionary", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-elevenlabs-key": key,
+      },
+      body: JSON.stringify({ rules: dictRules }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.id || !data?.version_id) {
+      throw new Error(
+        data?.message || "Failed to sync pronunciation dictionary."
+      );
+    }
+
+    const synced: SyncedDictState = {
+      id: data.id,
+      version_id: data.version_id,
+      hash: currentHash,
+      syncedAt: Date.now(),
+    };
+    setDictSynced(synced);
+    saveSynced(synced);
+    return { id: synced.id, version_id: synced.version_id };
+  }, [dictEnabled, dictRules, dictSynced, selectedModelId]);
+
   const trimmed = script.trim();
   const overLimit = script.length > MAX_CHARACTERS;
   const canGenerate =
@@ -156,6 +238,17 @@ export default function VoiceStudioPage() {
     }
 
     try {
+      let dictionaryLocator: { id: string; version_id: string } | null = null;
+      try {
+        dictionaryLocator = await ensureDictionary();
+      } catch (dictErr: unknown) {
+        throw new Error(
+          dictErr instanceof Error
+            ? `Pronunciation dictionary: ${dictErr.message}`
+            : "Failed to sync pronunciation dictionary."
+        );
+      }
+
       const res = await fetch("/api/elevenlabs/tts", {
         method: "POST",
         headers: {
@@ -167,6 +260,7 @@ export default function VoiceStudioPage() {
           voiceId: selectedVoiceId,
           modelId: selectedModelId,
           settings,
+          dictionaryLocator,
         }),
       });
 
@@ -199,7 +293,15 @@ export default function VoiceStudioPage() {
     } finally {
       setGenerating(false);
     }
-  }, [canGenerate, trimmed, selectedVoiceId, selectedModelId, settings, voices]);
+  }, [
+    canGenerate,
+    trimmed,
+    selectedVoiceId,
+    selectedModelId,
+    settings,
+    voices,
+    ensureDictionary,
+  ]);
 
   const downloadResult = () => {
     if (!resultUrl) return;
@@ -243,6 +345,10 @@ export default function VoiceStudioPage() {
           settings={settings}
           onSettingsChange={persistSettings}
           disabled={generating}
+          dictEnabled={dictEnabled}
+          onDictToggle={handleDictToggle}
+          dictRuleCount={dictRules.length}
+          onOpenDict={() => setDictPanelOpen(true)}
         />
 
         <div className="space-y-4">
@@ -310,6 +416,14 @@ export default function VoiceStudioPage() {
           <HistoryList refreshSignal={historyTick} />
         </div>
       </div>
+
+      <PronunciationDictPanel
+        isOpen={dictPanelOpen}
+        onClose={() => setDictPanelOpen(false)}
+        rules={dictRules}
+        onSave={handleDictSave}
+        synced={dictSynced}
+      />
     </div>
   );
 }
