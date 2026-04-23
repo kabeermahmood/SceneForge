@@ -22,10 +22,12 @@ import {
   DEFAULT_VOICE_SETTINGS,
   DEFAULT_MODEL_ID,
   MAX_CHARACTERS,
+  SAFE_CHUNK_CHARS,
   type Voice,
   type VoiceSettings,
 } from "@/lib/elevenlabs";
 import { addHistoryEntry } from "@/lib/voiceHistory";
+import { splitScript } from "@/lib/textChunker";
 import {
   hashRules,
   loadEnabled,
@@ -63,6 +65,12 @@ export default function VoiceStudioPage() {
   const [dictEnabled, setDictEnabled] = useState(false);
   const [dictSynced, setDictSynced] = useState<SyncedDictState | null>(null);
   const [dictPanelOpen, setDictPanelOpen] = useState(false);
+
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     const key = localStorage.getItem(ELEVENLABS_KEY_STORAGE)?.trim() || "";
@@ -229,6 +237,7 @@ export default function VoiceStudioPage() {
       return;
     }
 
+    cancelledRef.current = false;
     setGenerating(true);
     setError(null);
     if (resultUrlRef.current) {
@@ -236,6 +245,14 @@ export default function VoiceStudioPage() {
       resultUrlRef.current = null;
       setResultUrl(null);
     }
+
+    const chunks = splitScript(trimmed, SAFE_CHUNK_CHARS);
+    if (chunks.length === 0) {
+      setGenerating(false);
+      setError("Script is empty after trimming.");
+      return;
+    }
+    setProgress({ current: 0, total: chunks.length });
 
     try {
       let dictionaryLocator: { id: string; version_id: string } | null = null;
@@ -249,29 +266,55 @@ export default function VoiceStudioPage() {
         );
       }
 
-      const res = await fetch("/api/elevenlabs/tts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-elevenlabs-key": key,
-        },
-        body: JSON.stringify({
-          text: trimmed,
-          voiceId: selectedVoiceId,
-          modelId: selectedModelId,
-          settings,
-          dictionaryLocator,
-        }),
-      });
+      const audioBuffers: ArrayBuffer[] = [];
+      const requestIds: string[] = [];
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(
-          data?.message || `Generation failed (${res.status})`
-        );
+      for (let i = 0; i < chunks.length; i++) {
+        if (cancelledRef.current) {
+          throw new Error("Generation cancelled.");
+        }
+
+        const res = await fetch("/api/elevenlabs/tts", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-elevenlabs-key": key,
+          },
+          body: JSON.stringify({
+            text: chunks[i],
+            voiceId: selectedVoiceId,
+            modelId: selectedModelId,
+            settings,
+            dictionaryLocator,
+            previousRequestIds: requestIds.slice(-3),
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          const baseMsg =
+            data?.message || `Generation failed (${res.status})`;
+          throw new Error(
+            chunks.length > 1
+              ? `Part ${i + 1} of ${chunks.length}: ${baseMsg}`
+              : baseMsg
+          );
+        }
+
+        const requestId = res.headers.get("x-elevenlabs-request-id");
+        if (requestId) requestIds.push(requestId);
+
+        const buffer = await res.arrayBuffer();
+        audioBuffers.push(buffer);
+
+        setProgress({ current: i + 1, total: chunks.length });
       }
 
-      const blob = await res.blob();
+      if (cancelledRef.current) {
+        throw new Error("Generation cancelled.");
+      }
+
+      const blob = new Blob(audioBuffers, { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       resultUrlRef.current = url;
       setResultUrl(url);
@@ -292,6 +335,8 @@ export default function VoiceStudioPage() {
       setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
       setGenerating(false);
+      setProgress(null);
+      cancelledRef.current = false;
     }
   }, [
     canGenerate,
@@ -302,6 +347,11 @@ export default function VoiceStudioPage() {
     voices,
     ensureDictionary,
   ]);
+
+  const cancelGeneration = useCallback(() => {
+    if (!generating) return;
+    cancelledRef.current = true;
+  }, [generating]);
 
   const downloadResult = () => {
     if (!resultUrl) return;
