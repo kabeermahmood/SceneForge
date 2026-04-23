@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface TTSBody {
   text?: string;
@@ -16,6 +16,7 @@ interface TTSBody {
     id?: string;
     version_id?: string;
   } | null;
+  previousRequestIds?: string[];
 }
 
 export async function POST(req: NextRequest) {
@@ -79,6 +80,13 @@ export async function POST(req: NextRequest) {
     ];
   }
 
+  const previousIds = (body.previousRequestIds ?? [])
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .slice(-3);
+  if (previousIds.length > 0) {
+    upstreamPayload.previous_request_ids = previousIds;
+  }
+
   try {
     const upstream = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
@@ -117,12 +125,24 @@ export async function POST(req: NextRequest) {
     }
 
     const audio = await upstream.arrayBuffer();
+    const requestId =
+      upstream.headers.get("request-id") ||
+      upstream.headers.get("x-request-id") ||
+      "";
+
+    const responseHeaders: Record<string, string> = {
+      "Content-Type": "audio/mpeg",
+      "Cache-Control": "no-store",
+    };
+    if (requestId) {
+      responseHeaders["x-elevenlabs-request-id"] = requestId;
+      responseHeaders["Access-Control-Expose-Headers"] =
+        "x-elevenlabs-request-id";
+    }
+
     return new Response(audio, {
       status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-      },
+      headers: responseHeaders,
     });
   } catch (err: unknown) {
     return NextResponse.json(
