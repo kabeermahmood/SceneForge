@@ -10,6 +10,7 @@ import {
 
 interface CreditsBadgeProps {
   refreshSignal?: number;
+  onLoaded?: (subscription: Subscription) => void;
 }
 
 type State =
@@ -18,7 +19,10 @@ type State =
   | { status: "ready"; data: Subscription }
   | { status: "error"; message: string };
 
-export default function CreditsBadge({ refreshSignal = 0 }: CreditsBadgeProps) {
+export default function CreditsBadge({
+  refreshSignal = 0,
+  onLoaded,
+}: CreditsBadgeProps) {
   const [state, setState] = useState<State>({ status: "idle" });
 
   const load = async () => {
@@ -37,6 +41,7 @@ export default function CreditsBadge({ refreshSignal = 0 }: CreditsBadgeProps) {
         throw new Error(data?.message || "Failed to fetch credits");
       }
       setState({ status: "ready", data });
+      onLoaded?.(data);
     } catch (err: unknown) {
       setState({
         status: "error",
@@ -47,6 +52,9 @@ export default function CreditsBadge({ refreshSignal = 0 }: CreditsBadgeProps) {
 
   useEffect(() => {
     void load();
+    // onLoaded is intentionally excluded so a new function identity per render
+    // doesn't trigger an infinite refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSignal]);
 
   if (state.status === "loading" || state.status === "idle") {

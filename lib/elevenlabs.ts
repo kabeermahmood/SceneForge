@@ -2,10 +2,34 @@ export const ELEVENLABS_KEY_STORAGE = "elevenlabs_api_key";
 export const VOICE_SETTINGS_STORAGE = "voicestudio_settings";
 export const SELECTED_VOICE_STORAGE = "voicestudio_selected_voice";
 export const SELECTED_MODEL_STORAGE = "voicestudio_selected_model";
+export const CONCURRENCY_STORAGE = "voicestudio_concurrency";
 
 export const MAX_CHARACTERS = 100000;
 export const WARN_CHARACTERS = 50000;
 export const SAFE_CHUNK_CHARS = 4500;
+
+export const DEFAULT_CONCURRENCY = 2;
+export const FALLBACK_MAX_CONCURRENCY = 2;
+
+// ElevenLabs concurrent-request caps per plan (early 2026).
+// One slot is reserved for ad-hoc calls (voice preview, credits refresh, etc.).
+export const PLAN_CONCURRENCY: Record<string, number> = {
+  free: 2,
+  starter: 3,
+  creator: 5,
+  pro: 10,
+  scale: 15,
+  business: 15,
+  enterprise: 15,
+};
+
+export function getMaxConcurrency(tier?: string | null): number {
+  if (!tier) return FALLBACK_MAX_CONCURRENCY;
+  const key = tier.toLowerCase().trim();
+  // Reserve 1 slot of headroom; never go below 1.
+  const planCap = PLAN_CONCURRENCY[key] ?? FALLBACK_MAX_CONCURRENCY;
+  return Math.max(1, planCap - 1);
+}
 
 export interface VoiceLabels {
   accent?: string;

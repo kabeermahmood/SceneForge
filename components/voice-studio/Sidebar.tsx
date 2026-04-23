@@ -12,6 +12,8 @@ import {
   Pause,
   Cpu,
   AlertCircle,
+  Zap,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -39,6 +41,10 @@ interface SidebarProps {
   onDictToggle: (next: boolean) => void;
   dictRuleCount: number;
   onOpenDict: () => void;
+  concurrency: number;
+  onConcurrencyChange: (n: number) => void;
+  planMaxConcurrency: number;
+  planTier: string | null;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -59,6 +65,10 @@ export default function Sidebar(props: SidebarProps) {
     onDictToggle,
     dictRuleCount,
     onOpenDict,
+    concurrency,
+    onConcurrencyChange,
+    planMaxConcurrency,
+    planTier,
   } = props;
 
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
@@ -339,6 +349,14 @@ export default function Sidebar(props: SidebarProps) {
                 className="h-4 w-4 cursor-pointer accent-[var(--color-accent)] disabled:opacity-50"
               />
             </label>
+
+            <ConcurrencyControl
+              value={concurrency}
+              onChange={onConcurrencyChange}
+              planMax={planMaxConcurrency}
+              planTier={planTier}
+              disabled={disabled}
+            />
           </div>
         )}
       </section>
@@ -383,6 +401,88 @@ function Slider({ label, value, onChange, hint, disabled }: SliderProps) {
       />
       {hint && (
         <p className="text-[10px] leading-snug text-text-secondary">{hint}</p>
+      )}
+    </div>
+  );
+}
+
+interface ConcurrencyControlProps {
+  value: number;
+  onChange: (n: number) => void;
+  planMax: number;
+  planTier: string | null;
+  disabled?: boolean;
+}
+
+function ConcurrencyControl({
+  value,
+  onChange,
+  planMax,
+  planTier,
+  disabled,
+}: ConcurrencyControlProps) {
+  const safeMax = Math.max(1, planMax);
+  const options = Array.from({ length: safeMax }, (_, i) => i + 1);
+  const tierLabel = planTier
+    ? planTier.charAt(0).toUpperCase() + planTier.slice(1).toLowerCase()
+    : "Free / Starter";
+  const useSelect = safeMax > 6;
+
+  return (
+    <div className="space-y-2 border-t border-border/50 pt-3">
+      <div className="flex items-center justify-between text-xs">
+        <span className="flex items-center gap-1.5 text-text-secondary">
+          <Zap size={11} className="text-accent" />
+          Parallel Requests
+        </span>
+        <span className="font-mono text-accent">{value}×</span>
+      </div>
+
+      {useSelect ? (
+        <select
+          value={value}
+          onChange={(e) => onChange(parseInt(e.target.value, 10))}
+          disabled={disabled}
+          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text-primary outline-none transition focus:border-accent/40 disabled:opacity-50"
+        >
+          {options.map((n) => (
+            <option key={n} value={n}>
+              {n} {n === 1 ? "request" : "requests"} at a time
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {options.map((n) => (
+            <button
+              key={n}
+              onClick={() => onChange(n)}
+              disabled={disabled}
+              className={`min-w-[2rem] rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                value === n
+                  ? "border-accent/50 bg-accent/15 text-accent"
+                  : "border-border bg-background text-text-secondary hover:border-accent/30 hover:text-text-primary"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[10px] leading-snug text-text-secondary">
+        Plan: <span className="text-text-primary">{tierLabel}</span> &middot; max{" "}
+        {safeMax}
+      </p>
+
+      {value > 1 && (
+        <p className="flex items-start gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] leading-snug text-amber-400">
+          <AlertTriangle size={10} className="mt-0.5 shrink-0" />
+          <span>
+            Faster, but voice tone may shift between parts (prosody chain is
+            disabled).
+          </span>
+        </p>
       )}
     </div>
   );

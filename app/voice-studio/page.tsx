@@ -19,12 +19,17 @@ import {
   SELECTED_VOICE_STORAGE,
   SELECTED_MODEL_STORAGE,
   VOICE_SETTINGS_STORAGE,
+  CONCURRENCY_STORAGE,
   DEFAULT_VOICE_SETTINGS,
   DEFAULT_MODEL_ID,
+  DEFAULT_CONCURRENCY,
+  FALLBACK_MAX_CONCURRENCY,
   MAX_CHARACTERS,
   SAFE_CHUNK_CHARS,
+  getMaxConcurrency,
   type Voice,
   type VoiceSettings,
+  type Subscription,
 } from "@/lib/elevenlabs";
 import { addHistoryEntry } from "@/lib/voiceHistory";
 import { splitScript } from "@/lib/textChunker";
@@ -72,6 +77,12 @@ export default function VoiceStudioPage() {
   } | null>(null);
   const cancelledRef = useRef(false);
 
+  const [concurrency, setConcurrency] = useState<number>(DEFAULT_CONCURRENCY);
+  const [planTier, setPlanTier] = useState<string | null>(null);
+  const [planMaxConcurrency, setPlanMaxConcurrency] = useState<number>(
+    FALLBACK_MAX_CONCURRENCY
+  );
+
   useEffect(() => {
     const key = localStorage.getItem(ELEVENLABS_KEY_STORAGE)?.trim() || "";
     setHasApiKey(key.length > 0);
@@ -95,6 +106,12 @@ export default function VoiceStudioPage() {
     setDictRules(loadRules());
     setDictEnabled(loadEnabled());
     setDictSynced(loadSynced());
+
+    const savedConcurrency = localStorage.getItem(CONCURRENCY_STORAGE);
+    if (savedConcurrency) {
+      const parsed = parseInt(savedConcurrency, 10);
+      if (!Number.isNaN(parsed) && parsed >= 1) setConcurrency(parsed);
+    }
   }, []);
 
   useEffect(() => {
@@ -158,6 +175,29 @@ export default function VoiceStudioPage() {
     setSelectedModelId(id);
     localStorage.setItem(SELECTED_MODEL_STORAGE, id);
   };
+
+  const persistConcurrency = (n: number) => {
+    const safe = Math.max(1, Math.min(n, planMaxConcurrency));
+    setConcurrency(safe);
+    localStorage.setItem(CONCURRENCY_STORAGE, String(safe));
+  };
+
+  const handleSubscriptionLoaded = useCallback(
+    (sub: Subscription) => {
+      setPlanTier(sub.tier ?? null);
+      const max = getMaxConcurrency(sub.tier);
+      setPlanMaxConcurrency(max);
+      // Clamp the user's saved choice down if their plan can't sustain it.
+      setConcurrency((current) => {
+        if (current > max) {
+          localStorage.setItem(CONCURRENCY_STORAGE, String(max));
+          return max;
+        }
+        return current;
+      });
+    },
+    []
+  );
 
   const handleDictToggle = (next: boolean) => {
     setDictEnabled(next);
@@ -266,14 +306,17 @@ export default function VoiceStudioPage() {
         );
       }
 
-      const audioBuffers: ArrayBuffer[] = [];
-      const requestIds: string[] = [];
+      const total = chunks.length;
+      const audioBuffers: ArrayBuffer[] = new Array(total);
+      const effectiveConcurrency = Math.max(
+        1,
+        Math.min(concurrency, planMaxConcurrency, total)
+      );
 
-      for (let i = 0; i < chunks.length; i++) {
-        if (cancelledRef.current) {
-          throw new Error("Generation cancelled.");
-        }
-
+      const fetchChunk = async (
+        index: number,
+        previousRequestIds: string[]
+      ): Promise<string | null> => {
         const res = await fetch("/api/elevenlabs/tts", {
           method: "POST",
           headers: {
@@ -281,12 +324,12 @@ export default function VoiceStudioPage() {
             "x-elevenlabs-key": key,
           },
           body: JSON.stringify({
-            text: chunks[i],
+            text: chunks[index],
             voiceId: selectedVoiceId,
             modelId: selectedModelId,
             settings,
             dictionaryLocator,
-            previousRequestIds: requestIds.slice(-3),
+            previousRequestIds,
           }),
         });
 
@@ -295,19 +338,55 @@ export default function VoiceStudioPage() {
           const baseMsg =
             data?.message || `Generation failed (${res.status})`;
           throw new Error(
-            chunks.length > 1
-              ? `Part ${i + 1} of ${chunks.length}: ${baseMsg}`
+            total > 1
+              ? `Part ${index + 1} of ${total}: ${baseMsg}`
               : baseMsg
           );
         }
 
-        const requestId = res.headers.get("x-elevenlabs-request-id");
-        if (requestId) requestIds.push(requestId);
+        audioBuffers[index] = await res.arrayBuffer();
+        return res.headers.get("x-elevenlabs-request-id");
+      };
 
-        const buffer = await res.arrayBuffer();
-        audioBuffers.push(buffer);
+      let completed = 0;
+      const bumpProgress = () => {
+        completed += 1;
+        setProgress({ current: completed, total });
+      };
 
-        setProgress({ current: i + 1, total: chunks.length });
+      if (effectiveConcurrency === 1) {
+        // Sequential path — chain previous_request_ids for prosodic continuity.
+        const requestIds: string[] = [];
+        for (let i = 0; i < total; i++) {
+          if (cancelledRef.current) {
+            throw new Error("Generation cancelled.");
+          }
+          const id = await fetchChunk(i, requestIds.slice(-3));
+          if (id) requestIds.push(id);
+          bumpProgress();
+        }
+      } else {
+        // Parallel worker pool — no prosody chain (each chunk starts cold).
+        let nextIndex = 0;
+        const worker = async () => {
+          while (true) {
+            if (cancelledRef.current) return;
+            const i = nextIndex++;
+            if (i >= total) return;
+            await fetchChunk(i, []);
+            bumpProgress();
+          }
+        };
+
+        try {
+          await Promise.all(
+            Array.from({ length: effectiveConcurrency }, () => worker())
+          );
+        } catch (poolErr) {
+          // Stop other workers ASAP and surface the first error.
+          cancelledRef.current = true;
+          throw poolErr;
+        }
       }
 
       if (cancelledRef.current) {
@@ -346,6 +425,8 @@ export default function VoiceStudioPage() {
     settings,
     voices,
     ensureDictionary,
+    concurrency,
+    planMaxConcurrency,
   ]);
 
   const cancelGeneration = useCallback(() => {
@@ -377,7 +458,12 @@ export default function VoiceStudioPage() {
             Generate state-of-the-art voiceovers with ElevenLabs.
           </p>
         </div>
-        {hasApiKey && <CreditsBadge refreshSignal={creditsTick} />}
+        {hasApiKey && (
+          <CreditsBadge
+            refreshSignal={creditsTick}
+            onLoaded={handleSubscriptionLoaded}
+          />
+        )}
       </div>
 
       {/* Layout */}
@@ -399,6 +485,10 @@ export default function VoiceStudioPage() {
           onDictToggle={handleDictToggle}
           dictRuleCount={dictRules.length}
           onOpenDict={() => setDictPanelOpen(true)}
+          concurrency={concurrency}
+          onConcurrencyChange={persistConcurrency}
+          planMaxConcurrency={planMaxConcurrency}
+          planTier={planTier}
         />
 
         <div className="space-y-4">
