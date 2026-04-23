@@ -8,7 +8,7 @@ export const MAX_CHARACTERS = 100000;
 export const WARN_CHARACTERS = 50000;
 export const SAFE_CHUNK_CHARS = 4500;
 
-export const DEFAULT_CONCURRENCY = 2;
+export const DEFAULT_CONCURRENCY = 1;
 export const FALLBACK_MAX_CONCURRENCY = 2;
 
 // ElevenLabs concurrent-request caps per plan (early 2026).
