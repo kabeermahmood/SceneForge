@@ -430,7 +430,9 @@ export default function VoiceStudioPage() {
             {generating ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                Generating speech…
+                {progress && progress.total > 1
+                  ? `Generating part ${Math.max(progress.current, 1)} of ${progress.total}…`
+                  : "Generating speech…"}
               </>
             ) : (
               <>
@@ -439,6 +441,51 @@ export default function VoiceStudioPage() {
               </>
             )}
           </button>
+
+          {generating && progress && (
+            <div className="rounded-xl border border-border bg-surface px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between text-xs text-text-secondary">
+                <span>
+                  {progress.total > 1 ? (
+                    <>
+                      Stitching <span className="font-medium text-text-primary">{progress.total}</span> parts
+                      {" "}&middot;{" "}
+                      <span className="font-medium text-text-primary">
+                        {progress.current}
+                      </span>{" "}
+                      done
+                    </>
+                  ) : (
+                    "Synthesizing audio…"
+                  )}
+                </span>
+                <button
+                  onClick={cancelGeneration}
+                  disabled={cancelledRef.current}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-text-secondary transition hover:border-error/50 hover:text-error disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Stop after current part"
+                >
+                  <X size={11} />
+                  Cancel
+                </button>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-background">
+                <div
+                  className="h-full bg-accent transition-all duration-300"
+                  style={{
+                    width: `${
+                      progress.total > 0
+                        ? Math.min(
+                            100,
+                            (progress.current / progress.total) * 100
+                          )
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {resultUrl && (
             <section className="rounded-2xl border border-border bg-surface p-4 space-y-3">
