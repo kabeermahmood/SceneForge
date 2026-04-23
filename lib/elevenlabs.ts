@@ -3,7 +3,9 @@ export const VOICE_SETTINGS_STORAGE = "voicestudio_settings";
 export const SELECTED_VOICE_STORAGE = "voicestudio_selected_voice";
 export const SELECTED_MODEL_STORAGE = "voicestudio_selected_model";
 
-export const MAX_CHARACTERS = 5000;
+export const MAX_CHARACTERS = 100000;
+export const WARN_CHARACTERS = 50000;
+export const SAFE_CHUNK_CHARS = 4500;
 
 export interface VoiceLabels {
   accent?: string;
